@@ -1,0 +1,65 @@
+name: CI - Pruebas con PHPUnit
+
+# 1. CUÁNDO se va a ejecutar este pipeline
+on:
+  push:
+    branches: [ "dev" ] # Se ejecuta al hacer push a la rama dev
+  pull_request:
+    branches: [ "dev" ] # Se ejecuta al hacer un PR hacia la rama dev
+
+# 2. QUÉ va a hacer el pipeline
+jobs:
+  phpunit:
+    name: Run PHPUnit
+    # Usamos un servidor de Linux de GitHub (Ubuntu) para correr las pruebas
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      # Paso 1: Descargar el código de tu repositorio en el servidor de GitHub
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      # Paso 2: Preparar PHP en el servidor
+      - name: 🐘 Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: composer:v2
+
+      # Paso 3: Configurar el caché de Composer (Esto hace que sea más rápido la 2da vez)
+      - name: 📦 Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: 💾 Cache dependencies
+        uses: actions/cache@v4
+        with:
+          # Cacheamos tanto el caché global de Composer como la carpeta vendor
+          path: |
+            ${{ steps.composer-cache.outputs.dir }}
+            backend/vendor
+          # La clave depende del composer.lock. Si cambia el lock, se invalida el caché.
+          key: ${{ runner.os }}-composer-${{ hashFiles('backend/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      # Paso 4: Instalar las dependencias de tu proyecto
+      - name: 🚀 Install dependencies
+        run: composer install --prefer-dist --no-progress --no-suggest
+
+      # Paso 5: Preparar el archivo de entorno (.env) para las pruebas
+      - name: ⚙️ Prepare environment file
+        run: cp .env.example .env
+
+      # Paso 6: Generar la llave de la aplicación
+      - name: 🔑 Generate App Key
+        run: php artisan key:generate
+
+      # Paso 7: Finalmente, correr las pruebas con PHPUnit
+      - name: ✅ Run Tests
+        run: vendor/bin/phpunit
