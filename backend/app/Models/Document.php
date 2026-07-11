@@ -18,6 +18,7 @@ class Document extends Model
         'mime_type',
         'size',
         'status',
+        'error_message',
     ];
 
     public function user()
