@@ -9,6 +9,8 @@ use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Nuwave\Lighthouse\Exceptions\ValidationException;
 
 final class UploadDocument
 {
@@ -21,15 +23,38 @@ final class UploadDocument
         /** @var UploadedFile $file */
         $file = $args['file'];
 
-        $path = $file->store('documents');
+        // Strict PDF Validation
+        if ($file->getMimeType() !== 'application/pdf') {
+            throw ValidationException::withMessages(['file' => 'The document must be a valid PDF file.']);
+        }
+
+        if ($file->getSize() > 10 * 1024 * 1024) {
+            throw ValidationException::withMessages(['file' => 'The document must not be greater than 10 MB.']);
+        }
+
+        // Check magic bytes for PDF (%PDF-)
+        $resource = fopen($file->getRealPath(), 'rb');
+        $magicBytes = fread($resource, 5);
+        fclose($resource);
+
+        if ($magicBytes !== '%PDF-') {
+            throw ValidationException::withMessages(['file' => 'The document content is not a valid PDF.']);
+        }
+
+        // Sanitize filename for storage
+        $title = $args['title'] ?? $file->getClientOriginalName();
+        $originalName = $file->getClientOriginalName();
+        $sanitizedName = Str::slug(pathinfo($title, PATHINFO_FILENAME)) . '.pdf';
+
+        $path = $file->storeAs('documents', uniqid('', true) . '_' . $sanitizedName);
 
         /** @var \App\Models\User $user */
         $user = auth('sanctum')->user();
 
         $document = Document::create([
             'user_id'       => $user->id,
-            'title'         => $args['title'] ?? $file->getClientOriginalName(),
-            'original_name' => $file->getClientOriginalName(),
+            'title'         => $title,
+            'original_name' => $originalName,
             'file_path'     => $path,
             'mime_type'     => $file->getClientMimeType(),
             'size'          => $file->getSize(),

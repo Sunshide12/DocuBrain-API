@@ -6,11 +6,24 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Auth;
 
 class Document extends Model
 {
     /** @use HasFactory<\Database\Factories\DocumentFactory> */
     use HasFactory;
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope('owned', function (Builder $builder) {
+            // Apply only if there is an authenticated user (useful for console/jobs to bypass if needed, 
+            // though jobs usually run without auth so they might need to use withoutGlobalScope('owned'))
+            if (Auth::check()) {
+                $builder->where('user_id', Auth::id());
+            }
+        });
+    }
 
     protected $fillable = [
         'user_id',

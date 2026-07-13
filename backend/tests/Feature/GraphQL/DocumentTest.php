@@ -18,6 +18,12 @@ class DocumentTest extends TestCase
     use RefreshDatabase;
     use MakesGraphQLRequests;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::flush();
+    }
+
     /**
      * Test 1: A document can be uploaded via the GraphQL mutation.
      *
@@ -43,7 +49,7 @@ class DocumentTest extends TestCase
             'Authorization' => "Bearer $token",
         ]);
 
-        $file = UploadedFile::fake()->create('document.pdf', 1024, 'application/pdf');
+        $file = UploadedFile::fake()->createWithContent('document.pdf', '%PDF-1.4 Fake PDF Content');
 
         $operations = [
             'query'     => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file, title: "My Test Document") { id title original_name mime_type size status file_path } }',
@@ -199,7 +205,7 @@ class DocumentTest extends TestCase
         $this->assertTrue(Cache::has($versionedKey), 'Versioned cache key should exist before upload.');
 
         // 2. Upload a new document — fires DocumentUploaded → InvalidateDocumentsCache.
-        $file = UploadedFile::fake()->create('new.pdf', 512, 'application/pdf');
+        $file = UploadedFile::fake()->createWithContent('new.pdf', '%PDF-1.4 Fake PDF Content');
         $this->multipartGraphQL(
             ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
             ['0' => ['variables.file']],
@@ -209,5 +215,163 @@ class DocumentTest extends TestCase
         // 3. The version counter should now be 2 (incremented by the listener).
         // All subsequent queries will use key v2.* — a cache miss, so fresh data is fetched.
         $this->assertEquals(2, (int) Cache::get($versionKey), 'Version counter should be 2 after upload (invalidated).');
+    }
+
+    /**
+     * Test 5: A file with incorrect MIME type is rejected.
+     */
+    public function test_invalid_pdf_mime_type_is_rejected(): void
+    {
+        Storage::fake('local');
+        Bus::fake();
+
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // Create a fake image file testing with mime type diferent to pdf
+        $file = UploadedFile::fake()->createWithContent('image.jpg', 'image/jpeg');
+
+        $response = $this->multipartGraphQL(
+            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
+            ['0' => ['variables.file']],
+            ['0' => $file]
+        );
+
+        $response->assertJsonStructure(['errors']);
+        $this->assertStringContainsString('The document must be a valid PDF file.', $response->json('errors.0.message'));
+    }
+
+    /**
+     * Test 6: A file disguised as a PDF (bad magic bytes) is rejected.
+     */
+    public function test_invalid_pdf_magic_bytes_is_rejected(): void
+    {
+        Storage::fake('local');
+        Bus::fake();
+
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // Create a text file but give it a PDF extension and MIME type
+        $file = UploadedFile::fake()->createWithContent('fake.pdf', 'This is a text file pretending to be a PDF.');
+
+        $response = $this->multipartGraphQL(
+            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
+            ['0' => ['variables.file']],
+            ['0' => $file]
+        );
+
+        $response->assertJsonStructure(['errors']);
+        $this->assertStringContainsString('The document content is not a valid PDF.', $response->json('errors.0.message'));
+    }
+
+    /**
+     * Test 7: Multi-tenant isolation. A user cannot query another user's documents.
+     */
+    public function test_multi_tenant_isolation(): void
+    {
+        Bus::fake();
+
+        $user1 = User::factory()->create();
+        $user2 = User::factory()->create();
+
+        $doc1 = Document::factory()->create(['user_id' => $user1->id, 'title' => 'User1 Document']);
+        $doc2 = Document::factory()->create(['user_id' => $user2->id, 'title' => 'User2 Document']);
+
+        $token = $user1->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        $response = $this->graphQL('query { documents { data { id title } } }');
+
+        // Should only see User1's document
+        $data = $response->json('data.documents.data');
+        $this->assertCount(1, $data);
+        $this->assertEquals('User1 Document', $data[0]['title']);
+    }
+
+    /**
+     * Test 8: MIME Spoofing. A pure PHP file sent with 'application/pdf' HTTP Content-Type.
+     * PHP's finfo should detect it's not actually a PDF.
+     */
+    public function test_rejects_pure_php_file_with_spoofed_pdf_mime_type(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // Attacker creates a PHP file but tells the server it's a PDF.
+        $file = UploadedFile::fake()->createWithContent('shell.php', '<?php system("id"); ?>', 'application/pdf');
+
+        $response = $this->multipartGraphQL(
+            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
+            ['0' => ['variables.file']],
+            ['0' => $file],
+        );
+
+        // Should be rejected because getMimeType() uses finfo, which sees the PHP content, not the spoofed header.
+        $response->assertJsonStructure(['errors']);
+        $this->assertStringContainsString('The document must be a valid PDF file.', $response->json('errors.0.message'));
+    }
+
+    /**
+     * Test 9: Polyglot File (PDF + PHP). 
+     * Attacker sends a file with valid %PDF- magic bytes and padding to trick validation, but containing PHP code.
+     * The vulnerability relies on the server saving it and executing it. 
+     * We test that Laravel's finfo aggressively detects the PHP payload and rejects it outright.
+     */
+    public function test_polyglot_file_is_rejected_by_finfo(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // Polyglot: starts with PDF magic bytes, padded so it looks like a PDF, but contains a PHP shell
+        $polyglotContent = "%PDF-1.4\n" . str_repeat("A", 8192) . "\n<?php system('whoami'); ?>";
+        $file = UploadedFile::fake()->createWithContent('exploit.php', $polyglotContent, 'application/pdf');
+
+        $response = $this->multipartGraphQL(
+            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { file_path original_name } }', 'variables' => ['file' => null]],
+            ['0' => ['variables.file']],
+            ['0' => $file],
+        );
+
+        // Assert the backend rejects it because finfo detects text/x-php instead of application/pdf
+        $response->assertJsonStructure(['errors']);
+        $this->assertStringContainsString('The document must be a valid PDF file.', $response->json('errors.0.message'));
+    }
+
+    /**
+     * Test 10: Path Traversal & Null Byte Injection.
+     * Attacker tries to write outside the storage directory or trick the extension parser.
+     */
+    public function test_path_traversal_and_null_byte_injection_are_sanitized(): void
+    {
+        Storage::fake('local');
+        Bus::fake();
+
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // File name attempts to traverse directories and uses a null byte.
+        $maliciousName = "../../../etc/passwd\0.pdf";
+        $file = UploadedFile::fake()->createWithContent($maliciousName, '%PDF-1.4 Fake Content', 'application/pdf');
+
+        $this->multipartGraphQL(
+            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
+            ['0' => ['variables.file']],
+            ['0' => $file],
+        );
+
+        $document = Document::first();
+
+        // The file should be saved strictly in the 'documents' directory.
+        $this->assertStringStartsWith('documents/', $document->file_path);
+
+        // Str::slug() should have stripped out the slashes, dots, and null bytes completely.
+        $this->assertStringNotContainsString('../', $document->file_path);
+        $this->assertStringNotContainsString('\0', $document->file_path);
     }
 }

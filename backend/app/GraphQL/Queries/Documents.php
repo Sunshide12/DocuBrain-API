@@ -77,8 +77,8 @@ final class Documents
         return Cache::remember(
             key:     $cacheKey,
             ttl:     300,
-            callback: function () use ($userId, $first, $page): array {
-                $paginator = Document::where('user_id', $userId)
+            callback: function () use ($first, $page): array {
+                $paginator = Document::query()
                     ->latest()
                     ->paginate($first, ['*'], 'page', $page);
 
