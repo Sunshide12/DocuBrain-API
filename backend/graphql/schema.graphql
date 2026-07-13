@@ -21,6 +21,12 @@ type Query {
         @guard(with: ["sanctum"])
         @throttle(name: "api")
         @field(resolver: "App\\GraphQL\\Queries\\Chunks")
+
+    "Returns a paginated list of conversations for the authenticated user."
+    conversations: [Conversation!]! @paginate(defaultCount: 10) @guard(with: ["sanctum"])
+
+    "Returns a specific conversation by ID."
+    conversation(id: ID! @eq): Conversation @find @guard(with: ["sanctum"])
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -48,7 +54,34 @@ type Mutation {
         @guard(with: ["sanctum"])
         @throttle(name: "uploads")
         @field(resolver: "App\\GraphQL\\Mutations\\UploadDocument")
+
+    "Create a new conversation. If document_id is null, it's a library-wide search."
+    createConversation(document_id: ID, title: String): Conversation!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Mutations\\CreateConversation")
+
+    "Send a message to a conversation."
+    sendMessage(conversation_id: ID!, content: String!): Message!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Mutations\\SendMessage")
+
+    "Delete a conversation."
+    deleteConversation(id: ID!): Boolean!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Mutations\\DeleteConversation")
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Subscriptions
+# ─────────────────────────────────────────────────────────────────────────────
+#type Subscription {
+#    "Subscribe to document processing progress updates."
+#    documentProgress(document_id: ID!): DocumentProgress!
+#        @subscription(class: "App\\GraphQL\\Subscriptions\\DocumentProgress")
+#}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Types
@@ -147,6 +180,38 @@ type DocumentChunkPaginator {
     data: [DocumentChunk!]!
     "Metadata de paginación."
     paginatorInfo: PaginatorInfo!
+}
+
+"A conversation representing a chat with a document or the whole library."
+type Conversation {
+    id: ID!
+    document: Document @belongsTo
+    title: String!
+    total_tokens: Int!
+    messages: [Message!]! @hasMany
+    created_at: DateTime!
+    updated_at: DateTime!
+}
+
+"A single message in a conversation."
+type Message {
+    id: ID!
+    conversation: Conversation! @belongsTo
+    role: String!
+    content: String!
+    source_chunk_ids: [Int!]
+    prompt_tokens: Int
+    completion_tokens: Int
+    created_at: DateTime!
+    updated_at: DateTime!
+}
+
+"Payload for document progress updates."
+type DocumentProgress {
+    document_id: ID!
+    status: String!
+    progress: Int
+    message: String
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
