@@ -77,11 +77,11 @@ type Mutation {
 # ─────────────────────────────────────────────────────────────────────────────
 # Subscriptions
 # ─────────────────────────────────────────────────────────────────────────────
-#type Subscription {
-#    "Subscribe to document processing progress updates."
-#    documentProgress(document_id: ID!): DocumentProgress!
-#        @subscription(class: "App\\GraphQL\\Subscriptions\\DocumentProgress")
-#}
+type Subscription {
+    "Subscribe to document processing progress updates."
+    documentProgress(document_id: ID!): DocumentProgress
+        @subscription(class: "App\\GraphQL\\Subscriptions\\DocumentProgress")
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Types

@@ -164,32 +164,32 @@ Entidades de conversación y mensaje en el schema. Mutations de chat. Subscripti
 progreso conectada al Pub/Sub de Fase 4.
 
 ### 6.1 — Modelos y Migraciones
-- [ ] Migración `create_conversations_table`:
+- [x] Migración `create_conversations_table`:
   `id, user_id FK, document_id FK nullable, title nullable, timestamps`
-- [ ] Migración `create_messages_table`:
+- [x] Migración `create_messages_table`:
   `id, conversation_id FK, role enum(user,assistant), content text, source_chunk_ids json nullable, timestamps`
-- [ ] Modelo `Conversation` — global scope `owned`, relaciones `user`, `document`, `messages`
-- [ ] Modelo `Message` — relación `conversation`
-- [ ] Factories para ambos con Faker
+- [x] Modelo `Conversation` — global scope `owned`, relaciones `user`, `document`, `messages`
+- [x] Modelo `Message` — relación `conversation`
+- [x] Factories para ambos con Faker
 
 ### 6.2 — Schema GraphQL
-- [ ] Types `Conversation` y `Message`
-- [ ] `Query conversations` — paginada, autenticada
-- [ ] `Query conversation(id: ID!)` — con mensajes
-- [ ] `Mutation createConversation(document_id: ID, title: String): Conversation!`
-- [ ] `Mutation sendMessage(conversation_id: ID!, content: String!): Message!`
+- [x] Types `Conversation` y `Message`
+- [x] `Query conversations` — paginada, autenticada
+- [x] `Query conversation(id: ID!)` — con mensajes
+- [x] `Mutation createConversation(document_id: ID, title: String): Conversation!`
+- [x] `Mutation sendMessage(conversation_id: ID!, content: String!): Message!`
   - Guarda el mensaje del usuario
   - Devuelve un mensaje placeholder del assistant (RAG real en Fase 8)
-- [ ] `Mutation deleteConversation(id: ID!): Boolean!`
-- [ ] `Subscription documentProgress(document_id: ID!): DocumentProgress!`
+- [x] `Mutation deleteConversation(id: ID!): Boolean!`
+- [x] `Subscription documentProgress(document_id: ID!): DocumentProgress!`
   - Conecta con `Redis::publish()` de Fase 4
   - Alternativa: endpoint de polling si Subscriptions no encaja con sync processing
 
 ### Tests
-- [ ] CRUD de Conversation
-- [ ] CRUD de Message
-- [ ] `sendMessage` en conversación ajena ? error de autorización
-- [ ] Conversation sin `document_id` (búsqueda en toda la biblioteca) funciona
+- [x] CRUD de Conversation
+- [x] CRUD de Message
+- [x] `sendMessage` en conversación ajena ? error de autorización
+- [x] Conversation sin `document_id` (búsqueda en toda la biblioteca) funciona
 
 ---
 
@@ -232,7 +232,7 @@ SPA completa consumiendo la API GraphQL madura y testeada. Hospedada en Cloudfla
 
 ### Tests
 - [ ] Vitest: componentes Login, DocumentList, ChatBubble
-- [ ] Test de integración: login ? upload ? documento aparece en lista
+- [x] Test de integración: login -> upload -> documento aparece en lista
 
 ---
 

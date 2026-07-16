@@ -75,39 +75,23 @@ class ProcessDocumentJobTest extends TestCase
     }
 
     /**
-     * Test 3: The job publishes progress events to the correct Redis channel.
-     *
-     * HOW Redis::spy() WORKS
-     * ───────────────────────
-     * Redis::spy() wraps the Redis facade in a Mockery spy.
-     * A "spy" is like a mock but it doesn't fail if a method isn't called —
-     * it just RECORDS calls. After the fact, you can assert on what was called.
-     *
-     * Redis::shouldHaveReceived('publish') asserts the method was called.
-     * ->withArgs(fn($channel, $payload) => ...) inspects the arguments.
+     * Test 3: The job publishes progress events.
      */
     public function test_job_publishes_progress_events_to_redis(): void
     {
-        Redis::spy();
+        $broadcaster = \Mockery::spy(\Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions::class);
+        $this->app->instance(\Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions::class, $broadcaster);
 
         $document = Document::factory()->create(['status' => 'pending']);
 
         $job = new ProcessDocumentJob($document);
         $job->handle();
 
-        $expectedChannel = "docubrain.document.{$document->id}";
-
-        // Assert that Redis::publish was called at least once for our channel.
-        Redis::shouldHaveReceived('publish')
-            ->withArgs(function (string $channel, string $payload) use ($expectedChannel, $document): bool {
-                if ($channel !== $expectedChannel) {
-                    return false;
-                }
-
-                $data = json_decode($payload, true);
-
-                return $data['document_id'] === $document->id
-                    && isset($data['status'], $data['message'], $data['progress']);
+        $broadcaster->shouldHaveReceived('queueBroadcast')
+            ->withArgs(function ($subscription, $fieldName, $root) use ($document) {
+                return $fieldName === 'documentProgress' 
+                    && $root['document_id'] === $document->id
+                    && isset($root['status'], $root['message'], $root['progress']);
             })
             ->atLeast()
             ->once();
@@ -118,27 +102,21 @@ class ProcessDocumentJobTest extends TestCase
      */
     public function test_job_publishes_ready_event_as_last_step(): void
     {
-        Redis::spy();
+        $broadcaster = \Mockery::spy(\Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions::class);
+        $this->app->instance(\Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions::class, $broadcaster);
 
         $document = Document::factory()->create(['status' => 'pending']);
 
         (new ProcessDocumentJob($document))->handle();
 
-        $channel = "docubrain.document.{$document->id}";
         $receivedReadyEvent = false;
 
-        // Grab all recorded calls to Redis::publish and look for the 'ready' one.
-        Redis::shouldHaveReceived('publish')
-            ->withArgs(function (string $ch, string $payload) use ($channel, &$receivedReadyEvent): bool {
-                if ($ch !== $channel) {
-                    return false;
-                }
-                $data = json_decode($payload, true);
-                if (($data['status'] ?? '') === 'ready' && ($data['progress'] ?? 0) === 100) {
+        $broadcaster->shouldHaveReceived('queueBroadcast')
+            ->withArgs(function ($subscription, $fieldName, $root) use (&$receivedReadyEvent) {
+                if ($fieldName === 'documentProgress' && ($root['status'] ?? '') === 'ready' && ($root['progress'] ?? 0) === 100) {
                     $receivedReadyEvent = true;
                 }
-
-                return true; // Accept all calls so we can inspect them all.
+                return true;
             })
             ->atLeast()
             ->once();

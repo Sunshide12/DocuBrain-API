@@ -13,6 +13,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
+use Nuwave\Lighthouse\Execution\Utils\Subscription;
 
 /**
  * Processes a document through the pipeline:
@@ -101,17 +102,14 @@ final class ProcessDocumentJob implements ShouldQueue
      */
     private function updateProgress(string $status, string $message, int $progress): void
     {
-        $event = new DocumentProgressUpdated(
-            documentId: $this->document->id,
-            status: $status,
-            message: $message,
-            progress: $progress,
-        );
+        $payload = [
+            'document_id' => $this->document->id,
+            'status'      => $status,
+            'message'     => $message,
+            'progress'    => $progress,
+        ];
 
-        Redis::publish(
-            "docubrain.document.{$this->document->id}",
-            json_encode($event->toArray(), JSON_THROW_ON_ERROR),
-        );
+        Subscription::broadcast('documentProgress', $payload);
     }
 
     /**
