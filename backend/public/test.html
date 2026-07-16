@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocuBrain - Tester</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --surface-color: #1e293b;
+            --primary-color: #3b82f6;
+            --primary-hover: #2563eb;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            display: grid;
+            gap: 2rem;
+        }
+
+        .card {
+            background: var(--surface-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            margin-bottom: 1rem;
+            color: var(--primary-color);
+            font-size: 1.25rem;
+        }
+
+        input,
+        select,
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-color);
+            color: var(--text-main);
+            outline: none;
+        }
+
+        input:focus,
+        select:focus {
+            border-color: var(--primary-color);
+        }
+
+        button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: var(--primary-hover);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .flex-row {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .chat-box {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background: var(--bg-color);
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .message {
+            padding: 0.75rem;
+            border-radius: 8px;
+            max-width: 80%;
+            white-space: pre-wrap;
+        }
+
+        .message.user {
+            background: var(--primary-color);
+            align-self: flex-end;
+        }
+
+        .message.assistant {
+            background: var(--border-color);
+            align-self: flex-start;
+        }
+
+        .badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge.pending {
+            background: var(--warning);
+            color: white;
+        }
+
+        .badge.processing {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .badge.ready {
+            background: var(--success);
+            color: white;
+        }
+
+        .badge.failed {
+            background: var(--danger);
+            color: white;
+        }
+
+        .doc-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container" id="app">
+        <!-- AUTH SECTION -->
+        <div class="card" id="authSection">
+            <h2>Authentication</h2>
+            <div class="flex-row">
+                <div style="flex: 1">
+                    <h3>Register</h3>
+                    <input type="text" id="regName" placeholder="Name">
+                    <input type="email" id="regEmail" placeholder="Email">
+                    <input type="password" id="regPassword" placeholder="Password">
+                    <input type="password" id="regPasswordConf" placeholder="Confirm Password">
+                    <button onclick="register()">Register</button>
+                </div>
+                <div style="flex: 1">
+                    <h3>Login</h3>
+                    <input type="email" id="logEmail" placeholder="Email">
+                    <input type="password" id="logPassword" placeholder="Password">
+                    <button onclick="login()">Login</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- DASHBOARD SECTION -->
+        <div id="dashboardSection" class="hidden">
+            <div class="card" style="margin-bottom: 2rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2>DocuBrain Dashboard</h2>
+                    <button onclick="logout()" style="width: auto;">Logout</button>
+                </div>
+            </div>
+
+            <!-- UPLOAD SECTION -->
+            <div class="card" style="margin-bottom: 2rem;">
+                <h2>Upload Document (Max 10MB, PDF only)</h2>
+                <input type="file" id="fileInput" accept="application/pdf">
+                <button onclick="uploadDocument()">Upload & Process</button>
+                <div id="docsList" style="margin-top: 1rem;"></div>
+            </div>
+
+            <div class="flex-row">
+                <!-- CONVERSATIONS -->
+                <div class="card" style="flex: 1">
+                    <h2>Conversations</h2>
+                    <select id="docSelect">
+                        <option value="">Global Search (No Document)</option>
+                    </select>
+                    <button onclick="createConversation()">Create Conversation</button>
+
+                    <h3 style="margin-top: 1.5rem; margin-bottom: 1rem;">Select Conversation</h3>
+                    <select id="convSelect" onchange="loadConversation()"></select>
+                </div>
+
+                <!-- CHAT -->
+                <div class="card" style="flex: 2">
+                    <h2>Chat</h2>
+                    <div class="chat-box" id="chatBox"></div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" id="chatInput" placeholder="Type a message..." style="margin: 0;">
+                        <button onclick="sendMessage()" style="width: auto; margin: 0;">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/graphql';
+        let token = localStorage.getItem('auth_token');
+        let currentUserId = null;
+        let pollInterval = null;
+
+        if (token) checkAuth();
+
+        async function graphQLRequest(query, variables = {}, isMultipart = false) {
+            console.log(`[GraphQL Req]`, query.substring(0, 50).replace(/\n/g, '') + '...', variables);
+
+            const headers = { 'Accept': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+
+            let body;
+            if (isMultipart) {
+                body = new FormData();
+                let map = {};
+                let fileIdx = 0;
+
+                const findFiles = (obj, path) => {
+                    for (let key in obj) {
+                        if (obj[key] instanceof File) {
+                            map[fileIdx] = [path + '.' + key];
+                            body.append(fileIdx.toString(), obj[key]);
+                            obj[key] = null;
+                            fileIdx++;
+                        } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+                            findFiles(obj[key], path + '.' + key);
+                        }
+                    }
+                };
+
+                let varsCopy = { ...variables };
+                findFiles(varsCopy, 'variables');
+                body.append('operations', JSON.stringify({ query, variables: varsCopy }));
+                body.append('map', JSON.stringify(map));
+            } else {
+                headers['Content-Type'] = 'application/json';
+                body = JSON.stringify({ query, variables });
+            }
+
+            try {
+                const response = await fetch(API_URL, { method: 'POST', headers, body });
+                const json = await response.json();
+                console.log(`[GraphQL Res]`, json);
+
+                if (json.errors) {
+                    let errMsg = json.errors[0].message;
+                    if (json.errors[0].extensions && json.errors[0].extensions.validation) {
+                        const valErrors = json.errors[0].extensions.validation;
+                        errMsg += '\\n' + Object.values(valErrors).flat().join('\\n');
+                    }
+                    alert('GraphQL Error:\\n' + errMsg);
+                    throw new Error(errMsg);
+                }
+                return json.data;
+            } catch (err) {
+                console.error('[GraphQL Error]', err);
+                throw err;
+            }
+        }
+
+        function setAuth(authPayload) {
+            token = authPayload.token;
+            localStorage.setItem('auth_token', token);
+            document.getElementById('authSection').classList.add('hidden');
+            document.getElementById('dashboardSection').classList.remove('hidden');
+            fetchDocuments();
+            fetchConversations();
+            startPolling();
+        }
+
+        async function checkAuth() {
+            try {
+                const data = await graphQLRequest(`query { me { id name } }`);
+                if (data.me) {
+                    document.getElementById('authSection').classList.add('hidden');
+                    document.getElementById('dashboardSection').classList.remove('hidden');
+                    fetchDocuments();
+                    fetchConversations();
+                    startPolling();
+                } else {
+                    logout();
+                }
+            } catch (e) {
+                logout();
+            }
+        }
+
+        async function register() {
+            const variables = {
+                input: {
+                    name: document.getElementById('regName').value,
+                    email: document.getElementById('regEmail').value,
+                    password: document.getElementById('regPassword').value,
+                    password_confirmation: document.getElementById('regPasswordConf').value,
+                }
+            };
+            const data = await graphQLRequest(`
+                mutation Register($input: RegisterInput!) {
+                    register(input: $input) { token user { id name } }
+                }
+            `, variables);
+            if (data?.register) setAuth(data.register);
+        }
+
+        async function login() {
+            const variables = {
+                input: {
+                    email: document.getElementById('logEmail').value,
+                    password: document.getElementById('logPassword').value,
+                }
+            };
+            const data = await graphQLRequest(`
+                mutation Login($input: LoginInput!) {
+                    login(input: $input) { token user { id name } }
+                }
+            `, variables);
+            if (data?.login) setAuth(data.login);
+        }
+
+        function logout() {
+            if (token) {
+                graphQLRequest(`mutation { logout { message } }`).catch(console.error);
+            }
+            token = null;
+            localStorage.removeItem('auth_token');
+            if (pollInterval) clearInterval(pollInterval);
+            document.getElementById('authSection').classList.remove('hidden');
+            document.getElementById('dashboardSection').classList.add('hidden');
+        }
+
+        async function uploadDocument() {
+            const fileInput = document.getElementById('fileInput');
+            if (!fileInput.files.length) return alert('Select a file');
+
+            const file = fileInput.files[0];
+
+            // Client side validation
+            if (file.type !== 'application/pdf') {
+                return alert('Only PDF files are allowed!');
+            }
+            if (file.size > 10 * 1024 * 1024) {
+                return alert('File size must be less than 10MB!');
+            }
+
+            console.log('[Upload] Started for', file.name);
+            const data = await graphQLRequest(`
+                mutation Upload($file: Upload!) {
+                    uploadDocument(file: $file) { id title status }
+                }
+            `, { file }, true);
+
+            if (data?.uploadDocument) {
+                console.log('[Upload] Success', data.uploadDocument);
+                fetchDocuments();
+            }
+            fileInput.value = '';
+        }
+
+        async function fetchDocuments() {
+            const data = await graphQLRequest(`
+                query { documents(first: 50) { data { id title status original_name error_message } } }
+            `);
+            if (!data?.documents?.data) return;
+
+            const docs = data.documents.data;
+
+            // Render docs list
+            const html = docs.map(d => `
+                <div class="doc-item">
+                    <div>
+                        <strong>${d.title || d.original_name}</strong>
+                        ${d.error_message ? `<br><small style="color:var(--danger)">${d.error_message}</small>` : ''}
+                    </div>
+                    <span class="badge ${d.status}">${d.status}</span>
+                </div>
+            `).join('');
+            document.getElementById('docsList').innerHTML = html;
+
+            // Populate docSelect keeping current value if possible
+            const docSelect = document.getElementById('docSelect');
+            const curVal = docSelect.value;
+            docSelect.innerHTML = '<option value="">Global Search (No Document)</option>' +
+                docs.map(d => `<option value="${d.id}">${d.title || d.original_name}</option>`).join('');
+            if (curVal) docSelect.value = curVal;
+        }
+
+        function startPolling() {
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(() => {
+                console.log('[Polling] Checking document statuses...');
+                fetchDocuments();
+            }, 3000); // 3 seconds
+        }
+
+        async function createConversation() {
+            const docId = document.getElementById('docSelect').value;
+            const variables = {};
+            if (docId) variables.document_id = docId;
+
+            const data = await graphQLRequest(`
+                mutation CreateConv($document_id: ID) {
+                    createConversation(document_id: $document_id) { id title }
+                }
+            `, variables);
+
+            if (data?.createConversation) {
+                await fetchConversations();
+                document.getElementById('convSelect').value = data.createConversation.id;
+                loadConversation();
+            }
+        }
+
+        async function fetchConversations() {
+            const data = await graphQLRequest(`
+                query { conversations(first: 50) { data { id title } } }
+            `);
+            if (!data?.conversations?.data) return;
+
+            const select = document.getElementById('convSelect');
+            const curVal = select.value;
+            select.innerHTML = '<option value="">Select...</option>' +
+                data.conversations.data.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+            if (curVal) select.value = curVal;
+        }
+
+        async function loadConversation() {
+            const convId = document.getElementById('convSelect').value;
+            if (!convId) {
+                document.getElementById('chatBox').innerHTML = '';
+                return;
+            }
+
+            const data = await graphQLRequest(`
+                query GetConv($id: ID!) {
+                    conversation(id: $id) {
+                        id messages { id role content }
+                    }
+                }
+            `, { id: convId });
+
+            if (data?.conversation) {
+                renderMessages(data.conversation.messages);
+            }
+        }
+
+        function renderMessages(messages) {
+            const box = document.getElementById('chatBox');
+            box.innerHTML = messages.map(m => `
+                <div class="message ${m.role}">
+                    <strong>${m.role.toUpperCase()}</strong><br>
+                    ${m.content}
+                </div>
+            `).join('');
+            box.scrollTop = box.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const convId = document.getElementById('convSelect').value;
+            const input = document.getElementById('chatInput');
+            const content = input.value.trim();
+
+            if (!convId) return alert('Select a conversation first!');
+            if (!content) return;
+
+            input.value = '';
+
+            // Optimistic UI update
+            const box = document.getElementById('chatBox');
+            box.innerHTML += `<div class="message user"><strong>USER</strong><br>${content}</div>`;
+            box.scrollTop = box.scrollHeight;
+
+            const data = await graphQLRequest(`
+                mutation SendMsg($conversation_id: ID!, $content: String!) {
+                    sendMessage(conversation_id: $conversation_id, content: $content) {
+                        id role content
+                    }
+                }
+            `, { conversation_id: convId, content });
+
+            if (data?.sendMessage) {
+                const m = data.sendMessage;
+                box.innerHTML += `<div class="message ${m.role}"><strong>${m.role.toUpperCase()}</strong><br>${m.content}</div>`;
+                box.scrollTop = box.scrollHeight;
+            }
+        }
+    </script>
+</body>
+
+</html>
