@@ -43,5 +43,8 @@ class AppServiceProvider extends ServiceProvider
 
         // Invalidate the documents cache whenever a new document is uploaded.
         Event::listen(DocumentUploaded::class, InvalidateDocumentsCache::class);
+
+        // Invalidate the documents cache whenever a document finishes processing.
+        Event::listen(\App\Events\DocumentProcessed::class, \App\Listeners\InvalidateDocumentCacheOnCompletion::class);
     }
 }

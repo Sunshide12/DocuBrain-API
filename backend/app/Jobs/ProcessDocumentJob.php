@@ -59,6 +59,7 @@ final class ProcessDocumentJob implements ShouldQueue
 
             // Step 4 — done
             $this->document->update(['status' => 'ready']);
+            \App\Events\DocumentProcessed::dispatch($this->document);
             $this->updateProgress('ready', 'Document is ready.', 100);
 
             Log::info('ProcessDocumentJob completed', ['document_id' => $this->document->id]);
@@ -67,6 +68,7 @@ final class ProcessDocumentJob implements ShouldQueue
                 'status'        => 'failed',
                 'error_message' => $e->getMessage(),
             ]);
+            \App\Events\DocumentProcessed::dispatch($this->document);
 
             $this->updateProgress('failed', 'Processing failed: ' . $e->getMessage(), 0);
 
