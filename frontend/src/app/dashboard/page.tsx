@@ -68,7 +68,8 @@ export default function DashboardPage() {
     }
     if (meError) {
       toast.error("Session expired.");
-      router.push("/login");
+      setUser(null);
+      window.location.href = "/login?clearSession=true";
     }
   }, [meData, meError, setUser, router]);
 
@@ -88,8 +89,8 @@ export default function DashboardPage() {
       try {
         const query = `
           subscription {
-            documentUpdated {
-              id
+            documentProgress {
+              document_id
               status
             }
           }
@@ -102,7 +103,7 @@ export default function DashboardPage() {
             if (echo) {
               currentChannel = echo.private(channelName);
               currentChannel.listen(".lighthouse.subscription", (e: any) => {
-                const updatedDoc = e.data?.documentUpdated;
+                const updatedDoc = e.data?.documentProgress;
                 if (updatedDoc) {
                   queryClient.invalidateQueries({ queryKey: ["documents"] });
                   if (updatedDoc.status === 'ready') {
@@ -135,7 +136,7 @@ export default function DashboardPage() {
     mutationFn: () => graphqlClient.request(LOGOUT_MUTATION),
     onSuccess: () => {
       setUser(null);
-      router.push("/login");
+      window.location.href = "/login?clearSession=true";
     },
   });
 

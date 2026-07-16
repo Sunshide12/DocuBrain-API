@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\GraphQL\Mutations;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 final class Logout
 {
@@ -20,11 +21,16 @@ final class Logout
         /** @var \Illuminate\Http\Request $request */
         $request = $context->request();
 
-        // Revoke the token that was used to authenticate this request
+        // Revoke the token that was used to authenticate this request if it's a real token
         $user = $request->user();
-        if ($user) {
+        if ($user && $user->currentAccessToken() && !($user->currentAccessToken() instanceof \Laravel\Sanctum\TransientToken)) {
             $user->currentAccessToken()->delete();
         }
+
+        // Also ensure web session is logged out if SPA authentication was used
+        Auth::guard('web')->logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
 
         return [
             'message' => 'Logged out successfully.',

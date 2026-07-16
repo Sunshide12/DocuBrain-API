@@ -68,7 +68,7 @@ final class Documents
         //     (tests), the Redis driver (Docker/production), and any other cache backend.
         //   • Old versioned keys just expire after their TTL — no explicit deletion needed.
         $version  = (int) Cache::get("documents.user.{$userId}.version", 1);
-        $cacheKey = "documents.user.{$userId}.v{$version}.page.{$page}.per.{$first}";
+        $cacheKey = "documents.user.{$userId}.v{$version}.page.{$page}.per.{$first}.v2";
 
         // IMPORTANT: We cache the final plain array, NOT the LengthAwarePaginator object.
         // Caching an Eloquent paginator in Redis causes an unserialize() failure on the
@@ -86,7 +86,16 @@ final class Documents
                 // serialize/deserialize without needing model class definitions.
                 return [
                     'data'          => array_map(
-                        fn (Document $doc) => $doc->toArray(),
+                        function (Document $doc) {
+                            $arr = $doc->toArray();
+                            if ($doc->created_at) {
+                                $arr['created_at'] = $doc->created_at->format('Y-m-d H:i:s');
+                            }
+                            if ($doc->updated_at) {
+                                $arr['updated_at'] = $doc->updated_at->format('Y-m-d H:i:s');
+                            }
+                            return $arr;
+                        },
                         $paginator->items(),
                     ),
                     'paginatorInfo' => [

@@ -16,14 +16,15 @@ class DocumentProgress extends GraphQLSubscription
     {
         $args = $subscriber->args;
         $documentId = $args['document_id'] ?? null;
-        if (!$documentId) {
-            return false;
+        if ($documentId) {
+            // Only allow if the user owns the document
+            return Document::where('id', $documentId)
+                ->where('user_id', $subscriber->context->user()->id)
+                ->exists();
         }
 
-        // Only allow if the user owns the document
-        return Document::where('id', $documentId)
-            ->where('user_id', $subscriber->context->user()->id)
-            ->exists();
+        // Allow generic subscription for all user's documents
+        return true;
     }
 
     /**
@@ -32,6 +33,12 @@ class DocumentProgress extends GraphQLSubscription
     public function filter(Subscriber $subscriber, mixed $root): bool
     {
         $args = $subscriber->args;
-        return $root['document_id'] == $args['document_id'];
+        if (isset($args['document_id']) && $args['document_id']) {
+            return $root['document_id'] == $args['document_id'];
+        }
+
+        // Global subscription for the user, check if the document belongs to the user
+        $document = Document::find($root['document_id']);
+        return $document && $document->user_id == $subscriber->context->user()->id;
     }
 }
