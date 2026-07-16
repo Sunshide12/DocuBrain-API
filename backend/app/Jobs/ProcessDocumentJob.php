@@ -109,7 +109,7 @@ final class ProcessDocumentJob implements ShouldQueue
             'progress'    => $progress,
         ];
 
-        Subscription::broadcast('documentProgress', $payload);
+        Subscription::broadcast('documentProgress', $payload, true);
     }
 
     /**
