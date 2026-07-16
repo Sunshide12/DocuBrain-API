@@ -18,7 +18,7 @@ DocuBrain es un gestor de documentos con preguntas y respuestas (RAG). Un usuari
 | Decisión | Elección | Por qué |
 |---|---|---|
 | API | GraphQL vía Lighthouse, **fundacional desde Fase 0** | Evita reconstruir en fase 6 lo que ya existía como REST |
-| Frontend | Vue 3 + Vuetify 3 + Apollo Client, SPA separada | Arranca en fase 7 a propósito — API-first, testeada por Postman/GraphQL Playground hasta entonces |
+| Frontend | Next.js (React) + Shadcn/UI + TanStack Query | Se migró de Vue a Next.js (Fase 7) para mejor SSR, UI moderna y arquitectura híbrida de Auth (Sanctum HttpOnly). |
 | Base de datos | PostgreSQL + pgvector | Un solo motor para datos relacionales y vectores |
 | Cache/Colas | Redis | Jobs de procesamiento de PDF + Pub/Sub para progreso en vivo |
 | Embeddings | **Supuesto: OpenRouter API (`text-embedding-3-small`)** (1536 dims) | Más documentación/tutoriales Laravel+pgvector que alternativas. Alternativa real: Voyage AI (partner de Anthropic) |
@@ -87,7 +87,7 @@ docubrain/
 │   │   ├── Feature/
 │   │   └── Unit/
 │   └── database/migrations/
-├── frontend/                 # Vue 3 + Vuetify — se crea recién en Fase 7
+├── frontend/                 # Next.js (React) + Shadcn/UI — implementado en Fase 7
 ├── docker/
 │   ├── nginx/
 │   └── docker-compose.yml
@@ -122,8 +122,8 @@ Todo el stack detrás de Nginx como reverse proxy dentro de Docker Compose. SSL/
 **Fase 6 — GraphQL avanzado**
 Como la base de Lighthouse ya existe desde la Fase 0, acá se agrega lo avanzado: Subscription de progreso de procesamiento (conecta con el Pub/Sub de Fase 4), mutations de conversación/mensaje.
 
-**Fase 7 — Vue 3 + Vuetify**
-SPA completa consumiendo el API GraphQL ya maduro y testeado: login, upload con progreso en vivo, chat de preguntas, historial. Acá sí se escribe Vitest real sobre componentes reales.
+**Fase 7 — Next.js (React) + Shadcn/UI**
+SPA completa consumiendo el API GraphQL (y REST para descargas/subidas) maduro y testeado: login seguro con SSR Middleware, upload con progreso en vivo, chat de preguntas (Split-Screen), historial. Interfaces animadas con Framer Motion.
 
 **Fase 8 — pgvector / RAG**
 La única fase que introduce lógica de negocio genuinamente nueva — el resto de la infraestructura ya funciona. Foco 100% en: estrategia de chunking, calidad de embeddings, similarity search (cosine vs L2, índice ivfflat/hnsw), prompt para la respuesta con citas de fuente.

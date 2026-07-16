@@ -25,6 +25,9 @@ final class Register
             'password' => Hash::make($args['password']),
         ]);
 
+        \Illuminate\Support\Facades\Auth::guard('web')->login($user);
+        request()->session()->regenerate();
+
         $token = $user->createToken('api')->plainTextToken;
 
         return [

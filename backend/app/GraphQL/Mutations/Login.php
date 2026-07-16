@@ -21,18 +21,19 @@ final class Login
      */
     public function __invoke(null $_, array $args): array
     {
-        $user = User::where('email', $args['email'])->first();
-
-        if (! $user || ! Hash::check($args['password'], $user->password)) {
+        if (! \Illuminate\Support\Facades\Auth::guard('web')->attempt(['email' => $args['email'], 'password' => $args['password']])) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 
-        // Revoke previous tokens to allow only one active session at a time
-        // (optional: remove this line to allow multiple concurrent sessions)
-        $user->tokens()->delete();
+        // Regenerate session to prevent fixation
+        request()->session()->regenerate();
 
+        /** @var \App\Models\User $user */
+        $user = \Illuminate\Support\Facades\Auth::guard('web')->user();
+
+        // Also create a token just in case mobile apps need it, but SPA will use the cookie.
         $token = $user->createToken('api')->plainTextToken;
 
         return [

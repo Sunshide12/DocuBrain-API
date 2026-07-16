@@ -51,34 +51,22 @@ class DocumentTest extends TestCase
 
         $file = UploadedFile::fake()->createWithContent('document.pdf', '%PDF-1.4 Fake PDF Content');
 
-        $operations = [
-            'query'     => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file, title: "My Test Document") { id title original_name mime_type size status file_path } }',
-            'variables' => [
-                'file' => null,
-            ],
-        ];
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+            'title' => 'My Test Document',
+        ]);
 
-        $map = [
-            '0' => ['variables.file'],
-        ];
-
-        $files = [
-            '0' => $file,
-        ];
-
-        $response = $this->multipartGraphQL($operations, $map, $files);
-
+        $response->assertStatus(201);
         $response->assertJsonStructure([
-            'data' => [
-                'uploadDocument' => [
-                    'id',
-                    'title',
-                    'original_name',
-                    'mime_type',
-                    'size',
-                    'status',
-                    'file_path',
-                ],
+            'message',
+            'document' => [
+                'id',
+                'title',
+                'original_name',
+                'mime_type',
+                'size',
+                'status',
+                'file_path',
             ],
         ]);
 
@@ -206,11 +194,10 @@ class DocumentTest extends TestCase
 
         // 2. Upload a new document — fires DocumentUploaded → InvalidateDocumentsCache.
         $file = UploadedFile::fake()->createWithContent('new.pdf', '%PDF-1.4 Fake PDF Content');
-        $this->multipartGraphQL(
-            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
-            ['0' => ['variables.file']],
-            ['0' => $file],
-        );
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
+        $response->assertStatus(201);
 
         // 3. The version counter should now be 2 (incremented by the listener).
         // All subsequent queries will use key v2.* — a cache miss, so fresh data is fetched.
@@ -232,14 +219,13 @@ class DocumentTest extends TestCase
         // Create a fake image file testing with mime type diferent to pdf
         $file = UploadedFile::fake()->createWithContent('image.jpg', 'image/jpeg');
 
-        $response = $this->multipartGraphQL(
-            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
-            ['0' => ['variables.file']],
-            ['0' => $file]
-        );
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
 
-        $response->assertJsonStructure(['errors']);
-        $this->assertStringContainsString('The document must be a valid PDF file.', $response->json('errors.0.message'));
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('file');
+        $this->assertStringContainsString('file of type', $response->json('errors.file.0') ?? $response->json('message'));
     }
 
     /**
@@ -257,14 +243,13 @@ class DocumentTest extends TestCase
         // Create a text file but give it a PDF extension and MIME type
         $file = UploadedFile::fake()->createWithContent('fake.pdf', 'This is a text file pretending to be a PDF.');
 
-        $response = $this->multipartGraphQL(
-            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
-            ['0' => ['variables.file']],
-            ['0' => $file]
-        );
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
 
-        $response->assertJsonStructure(['errors']);
-        $this->assertStringContainsString('The document content is not a valid PDF.', $response->json('errors.0.message'));
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('file');
+        $this->assertStringContainsString('The document content is not a valid PDF', $response->json('errors.file.0') ?? $response->json('message'));
     }
 
     /**
@@ -304,15 +289,13 @@ class DocumentTest extends TestCase
         // Attacker creates a PHP file but tells the server it's a PDF.
         $file = UploadedFile::fake()->createWithContent('shell.php', '<?php system("id"); ?>', 'application/pdf');
 
-        $response = $this->multipartGraphQL(
-            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
-            ['0' => ['variables.file']],
-            ['0' => $file],
-        );
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
 
-        // Should be rejected because getMimeType() uses finfo, which sees the PHP content, not the spoofed header.
-        $response->assertJsonStructure(['errors']);
-        $this->assertStringContainsString('The document must be a valid PDF file.', $response->json('errors.0.message'));
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('file');
+        $this->assertStringContainsString('file of type', $response->json('errors.file.0') ?? $response->json('message'));
     }
 
     /**
@@ -331,15 +314,13 @@ class DocumentTest extends TestCase
         $polyglotContent = "%PDF-1.4\n" . str_repeat("A", 8192) . "\n<?php system('whoami'); ?>";
         $file = UploadedFile::fake()->createWithContent('exploit.php', $polyglotContent, 'application/pdf');
 
-        $response = $this->multipartGraphQL(
-            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { file_path original_name } }', 'variables' => ['file' => null]],
-            ['0' => ['variables.file']],
-            ['0' => $file],
-        );
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
 
-        // Assert the backend rejects it because finfo detects text/x-php instead of application/pdf
-        $response->assertJsonStructure(['errors']);
-        $this->assertStringContainsString('The document must be a valid PDF file.', $response->json('errors.0.message'));
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('file');
+        $this->assertStringContainsString('file of type', $response->json('errors.file.0') ?? $response->json('message'));
     }
 
     /**
@@ -359,11 +340,10 @@ class DocumentTest extends TestCase
         $maliciousName = "../../../etc/passwd\0.pdf";
         $file = UploadedFile::fake()->createWithContent($maliciousName, '%PDF-1.4 Fake Content', 'application/pdf');
 
-        $this->multipartGraphQL(
-            ['query' => 'mutation UploadDocument($file: Upload!) { uploadDocument(file: $file) { id } }', 'variables' => ['file' => null]],
-            ['0' => ['variables.file']],
-            ['0' => $file],
-        );
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
+        $response->assertStatus(201);
 
         $document = Document::first();
 

@@ -59,42 +59,20 @@ class IntegrationFlowTest extends TestCase
         // 2. Subir un PDF
         $file = UploadedFile::fake()->createWithContent('integration.pdf', '%PDF-1.4 Fake Content');
 
-        $uploadMutation = '
-            mutation UploadDocument($file: Upload!) {
-                uploadDocument(file: $file, title: "Integration Document") {
-                    id
-                    status
-                }
-            }
-        ';
+        $uploadResponse = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+            'title' => 'Integration Document'
+        ]);
 
-        $operations = [
-            'query'     => $uploadMutation,
-            'variables' => [
-                'file' => null,
-            ],
-        ];
-
-        $map = [
-            '0' => ['variables.file'],
-        ];
-
-        $files = [
-            '0' => $file,
-        ];
-
-        $uploadResponse = $this->multipartGraphQL($operations, $map, $files);
-
+        $uploadResponse->assertStatus(201);
         $uploadResponse->assertJsonStructure([
-            'data' => [
-                'uploadDocument' => [
-                    'id',
-                    'status',
-                ],
+            'document' => [
+                'id',
+                'status',
             ],
         ]);
 
-        $documentId = $uploadResponse->json('data.uploadDocument.id');
+        $documentId = $uploadResponse->json('document.id');
         $this->assertNotNull($documentId);
 
         // 3. Verificar que el documento existe y, dado que la cola es síncrona en testing, ya está en estado 'ready'.
