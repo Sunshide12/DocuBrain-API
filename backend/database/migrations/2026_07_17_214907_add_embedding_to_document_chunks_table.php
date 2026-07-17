@@ -12,9 +12,15 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Habilitar extensión si no está activa (idempotente)
-        DB::statement('CREATE EXTENSION IF NOT EXISTS vector');
-        DB::statement('ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS embedding vector(1536)');
+        if (DB::getDriverName() === 'pgsql') {
+            // Habilitar extensión si no está activa (idempotente)
+            DB::statement('CREATE EXTENSION IF NOT EXISTS vector');
+            DB::statement('ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS embedding vector(1536)');
+        } else {
+            Schema::table('document_chunks', function (Blueprint $table) {
+                $table->text('embedding')->nullable();
+            });
+        }
     }
 
     /**
@@ -22,6 +28,12 @@ return new class extends Migration
      */
     public function down(): void
     {
-        DB::statement('ALTER TABLE document_chunks DROP COLUMN IF EXISTS embedding');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('ALTER TABLE document_chunks DROP COLUMN IF EXISTS embedding');
+        } else {
+            Schema::table('document_chunks', function (Blueprint $table) {
+                $table->dropColumn('embedding');
+            });
+        }
     }
 };

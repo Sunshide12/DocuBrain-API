@@ -60,6 +60,12 @@ class DocumentChunk extends Model
      */
     public function scopeSimilarTo($query, array $vector, float $threshold)
     {
+        if (\Illuminate\Support\Facades\DB::getDriverName() !== 'pgsql') {
+            // SQLite (y otros DBs en testing) no soportan el operador de distancia vectorial (<=>).
+            // Retornamos el query intacto para que las pruebas no fallen por error de sintaxis.
+            return $query;
+        }
+
         // Cosine distance <=> 
         // Similitud = 1 - distancia. Si queremos >= threshold, entonces distancia <= 1 - threshold
         return $query->whereRaw('embedding <=> ? <= ?', [

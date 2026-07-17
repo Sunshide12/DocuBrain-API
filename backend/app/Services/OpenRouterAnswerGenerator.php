@@ -26,17 +26,9 @@ class OpenRouterAnswerGenerator implements AnswerGenerator
         }, $contextChunks));
 
         $prompt = <<<EOT
-Eres un asistente que responde preguntas ÚNICAMENTE basándote en el contexto
-proporcionado. Si la respuesta no está en el contexto, responde exactamente:
-"No tengo información suficiente para responder esa pregunta con los documentos disponibles."
-No uses conocimiento externo bajo ninguna circunstancia.
-
-Contexto:
-$contextText
-
-Pregunta:
-$question
+Eres un asistente que responde preguntas ÚNICAMENTE basándote en el contexto...
 EOT;
+
 
         // Decisión: Sin historial de conversación. Cada pregunta es independiente.
         // El costo por consulta sube linealmente con los turnos anteriores si se añade historial.
