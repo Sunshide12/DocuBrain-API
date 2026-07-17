@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost', // Laravel API endpoint via Nginx
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000', // Laravel API endpoint
   headers: {
     'X-Requested-With': 'XMLHttpRequest',
     'Accept': 'application/json',

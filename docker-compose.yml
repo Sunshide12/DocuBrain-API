@@ -52,6 +52,8 @@ services:
       dockerfile: Dockerfile
     container_name: docubrain-app
     restart: unless-stopped
+    ports:
+      - "8000:8000"
     working_dir: /var/www/html
     volumes:
       - ./backend:/var/www/html
@@ -75,19 +77,7 @@ services:
       redis:
         condition: service_healthy
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Nginx Reverse Proxy
-  # ─────────────────────────────────────────────────────────────────────────
-  nginx:
-    build:
-      context: ./docker/nginx
-      dockerfile: Dockerfile
-    container_name: docubrain-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    depends_on:
-      - app
+
 
   # ─────────────────────────────────────────────────────────────────────────
   # Laravel Reverb (WebSockets)

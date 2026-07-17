@@ -1,6 +1,6 @@
 import { GraphQLClient } from 'graphql-request';
 
-export const graphqlClient = new GraphQLClient('http://localhost/graphql', {
+export const graphqlClient = new GraphQLClient(process.env.NEXT_PUBLIC_GRAPHQL_URL || 'http://localhost:8000/graphql', {
   fetch: async (url, options) => {
     const headers = new Headers(options?.headers);
     

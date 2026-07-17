@@ -128,7 +128,7 @@ export default function ChatPage() {
         <div className="flex-1 relative">
           {documentId ? (
             <iframe
-              src={`http://localhost/api/documents/${documentId}/download`}
+              src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/documents/${documentId}/download`}
               className="absolute inset-0 w-full h-full border-0"
               title="PDF Viewer"
             />

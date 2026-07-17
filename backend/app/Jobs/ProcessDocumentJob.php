@@ -13,7 +13,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
-use Nuwave\Lighthouse\Execution\Utils\Subscription;
+
 
 /**
  * Processes a document through the pipeline:
@@ -102,14 +102,17 @@ final class ProcessDocumentJob implements ShouldQueue
      */
     private function updateProgress(string $status, string $message, int $progress): void
     {
-        $payload = [
-            'document_id' => $this->document->id,
-            'status'      => $status,
-            'message'     => $message,
-            'progress'    => $progress,
-        ];
+        // Save the intermediate state in the database
+        $this->document->update(['status' => $status]);
 
-        Subscription::broadcast('documentProgress', $payload, true);
+        // Dispatch the standard Laravel broadcast event
+        \App\Events\DocumentProgressUpdated::dispatch(
+            $this->document->id,
+            $this->document->user_id,
+            $status,
+            $message,
+            $progress
+        );
     }
 
     /**
