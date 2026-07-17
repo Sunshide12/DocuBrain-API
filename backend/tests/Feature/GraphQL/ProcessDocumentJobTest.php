@@ -79,22 +79,17 @@ class ProcessDocumentJobTest extends TestCase
      */
     public function test_job_publishes_progress_events_to_redis(): void
     {
-        $broadcaster = \Mockery::spy(\Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions::class);
-        $this->app->instance(\Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions::class, $broadcaster);
+        Event::fake([\App\Events\DocumentProgressUpdated::class]);
 
         $document = Document::factory()->create(['status' => 'pending']);
 
         $job = new ProcessDocumentJob($document);
         $job->handle();
 
-        $broadcaster->shouldHaveReceived('queueBroadcast')
-            ->withArgs(function ($subscription, $fieldName, $root) use ($document) {
-                return $fieldName === 'documentProgress' 
-                    && $root['document_id'] === $document->id
-                    && isset($root['status'], $root['message'], $root['progress']);
-            })
-            ->atLeast()
-            ->once();
+        Event::assertDispatched(\App\Events\DocumentProgressUpdated::class, function ($event) use ($document) {
+            return $event->documentId === $document->id 
+                && $event->status === 'extracting';
+        });
     }
 
     /**
@@ -102,26 +97,17 @@ class ProcessDocumentJobTest extends TestCase
      */
     public function test_job_publishes_ready_event_as_last_step(): void
     {
-        $broadcaster = \Mockery::spy(\Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions::class);
-        $this->app->instance(\Nuwave\Lighthouse\Subscriptions\Contracts\BroadcastsSubscriptions::class, $broadcaster);
+        Event::fake([\App\Events\DocumentProgressUpdated::class]);
 
         $document = Document::factory()->create(['status' => 'pending']);
 
         (new ProcessDocumentJob($document))->handle();
 
-        $receivedReadyEvent = false;
-
-        $broadcaster->shouldHaveReceived('queueBroadcast')
-            ->withArgs(function ($subscription, $fieldName, $root) use (&$receivedReadyEvent) {
-                if ($fieldName === 'documentProgress' && ($root['status'] ?? '') === 'ready' && ($root['progress'] ?? 0) === 100) {
-                    $receivedReadyEvent = true;
-                }
-                return true;
-            })
-            ->atLeast()
-            ->once();
-
-        $this->assertTrue($receivedReadyEvent, 'Expected a "ready" progress event to be published.');
+        Event::assertDispatched(\App\Events\DocumentProgressUpdated::class, function ($event) use ($document) {
+            return $event->documentId === $document->id 
+                && $event->status === 'ready' 
+                && $event->progress === 100;
+        });
     }
 
     /**

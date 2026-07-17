@@ -14,7 +14,6 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 
-
 /**
  * Processes a document through the pipeline:
  *   extracting → chunking → embedding → ready
@@ -60,7 +59,6 @@ final class ProcessDocumentJob implements ShouldQueue
 
             // Step 4 — done
             $this->document->update(['status' => 'ready']);
-            \App\Events\DocumentProcessed::dispatch($this->document);
             $this->updateProgress('ready', 'Document is ready.', 100);
 
             Log::info('ProcessDocumentJob completed', ['document_id' => $this->document->id]);
@@ -69,7 +67,6 @@ final class ProcessDocumentJob implements ShouldQueue
                 'status'        => 'failed',
                 'error_message' => $e->getMessage(),
             ]);
-            \App\Events\DocumentProcessed::dispatch($this->document);
 
             $this->updateProgress('failed', 'Processing failed: ' . $e->getMessage(), 0);
 
@@ -102,17 +99,27 @@ final class ProcessDocumentJob implements ShouldQueue
      */
     private function updateProgress(string $status, string $message, int $progress): void
     {
+        // Log to terminal so we can see the steps taking place
+        Log::info("Document {$this->document->id} is now in step: {$status}");
         // Save the intermediate state in the database
         $this->document->update(['status' => $status]);
 
+        // Invalidate the GraphQL queries cache so that reloads show the new status
+        \Illuminate\Support\Facades\Cache::increment("documents.user.{$this->document->user_id}.version");
+
         // Dispatch the standard Laravel broadcast event
-        \App\Events\DocumentProgressUpdated::dispatch(
-            $this->document->id,
-            $this->document->user_id,
-            $status,
-            $message,
-            $progress
-        );
+        try {
+            DocumentProgressUpdated::dispatch(
+                $this->document->id,
+                $this->document->user_id,
+                $status,
+                $message,
+                $progress
+            );
+            Log::info("Broadcast dispatched for status: {$status}");
+        } catch (\Throwable $e) {
+            Log::error("Failed to broadcast: " . $e->getMessage());
+        }
     }
 
     /**

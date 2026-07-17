@@ -87,34 +87,43 @@ export default function DashboardPage() {
 
     const subscribeToDocuments = async () => {
       try {
-        const query = `
-          subscription {
-            documentProgress {
-              document_id
-              status
-            }
-          }
-        `;
-        const response: any = await graphqlClient.request(query);
-        const channelName = response?.extensions?.lighthouse_subscriptions?.channel;
+        if (typeof window !== "undefined") {
+          const { echo } = await import("@/lib/echo");
+          if (echo) {
+            // Listen on the user's private channel
+            currentChannel = echo.private(`App.Models.User.${user.id}`);
+            
+            // Listen for the custom broadcast event
+            currentChannel.listen(".DocumentProgressUpdated", (e: any) => {
+              if (e && e.document_id) {
+                // Optimistically update the react-query cache
+                queryClient.setQueryData(["documents"], (oldData: any) => {
+                  if (!oldData || !oldData.documents || !oldData.documents.data) return oldData;
+                  
+                  const updatedDocs = oldData.documents.data.map((doc: any) => {
+                    if (doc.id === e.document_id.toString()) {
+                      return { ...doc, status: e.status };
+                    }
+                    return doc;
+                  });
 
-        if (channelName && typeof window !== "undefined") {
-          import("@/lib/echo").then(({ echo }) => {
-            if (echo) {
-              currentChannel = echo.private(channelName);
-              currentChannel.listen(".lighthouse.subscription", (e: any) => {
-                const updatedDoc = e.data?.documentProgress;
-                if (updatedDoc) {
-                  queryClient.invalidateQueries({ queryKey: ["documents"] });
-                  if (updatedDoc.status === 'ready') {
-                     toast.success("A document has finished processing and is ready!");
-                  } else if (updatedDoc.status === 'failed') {
-                     toast.error("A document failed to process.");
-                  }
+                  return {
+                    ...oldData,
+                    documents: {
+                      ...oldData.documents,
+                      data: updatedDocs,
+                    },
+                  };
+                });
+
+                if (e.status === 'ready') {
+                   toast.success("A document has finished processing and is ready!");
+                } else if (e.status === 'failed') {
+                   toast.error("A document failed to process.");
                 }
-              });
-            }
-          });
+              }
+            });
+          }
         }
       } catch (e) {
         console.error("Subscription failed", e);
