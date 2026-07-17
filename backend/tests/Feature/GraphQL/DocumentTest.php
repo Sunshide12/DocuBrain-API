@@ -24,6 +24,33 @@ class DocumentTest extends TestCase
         Cache::flush();
     }
 
+    private function authenticateAndSeedDocumentsCache(int $documentCount): User
+    {
+        $user = User::factory()->create();
+        Document::factory($documentCount)->create(['user_id' => $user->id]);
+
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        $query = '
+            query {
+                documents {
+                    data { id }
+                    paginatorInfo { total }
+                }
+            }
+        ';
+
+        // First request — should populate cache.
+        $this->graphQL($query)->assertJsonPath('data.documents.paginatorInfo.total', $documentCount);
+
+        // Verify the versioned cache key was actually populated (version defaults to 1).
+        $cacheKey = "documents.user.{$user->id}.v1.page.1.per.10";
+        $this->assertTrue(Cache::has($cacheKey), "Expected versioned cache key '{$cacheKey}' to exist after first query.");
+
+        return $user;
+    }
+
     /**
      * Test 1: A document can be uploaded via the GraphQL mutation.
      *
@@ -136,11 +163,7 @@ class DocumentTest extends TestCase
     {
         Bus::fake();
 
-        $user = User::factory()->create();
-        Document::factory(2)->create(['user_id' => $user->id]);
-
-        $token = $user->createToken('test-token')->plainTextToken;
-        $this->withHeaders(['Authorization' => "Bearer $token"]);
+        $user = $this->authenticateAndSeedDocumentsCache(2);
 
         $query = '
             query {
@@ -150,13 +173,6 @@ class DocumentTest extends TestCase
                 }
             }
         ';
-
-        // First request — should populate cache.
-        $this->graphQL($query)->assertJsonPath('data.documents.paginatorInfo.total', 2);
-
-        // Verify the versioned cache key was actually populated (version defaults to 1).
-        $cacheKey = "documents.user.{$user->id}.v1.page.1.per.10";
-        $this->assertTrue(Cache::has($cacheKey), "Expected versioned cache key '{$cacheKey}' to exist after first query.");
 
         // Second request — should still return the same total (served from cache).
         // To prove cache is being used, add a new document AFTER caching.
@@ -178,19 +194,9 @@ class DocumentTest extends TestCase
         Storage::fake('local');
         Bus::fake();
 
-        $user = User::factory()->create();
-        Document::factory(2)->create(['user_id' => $user->id]);
+        $user = $this->authenticateAndSeedDocumentsCache(2);
 
-        $token = $user->createToken('test-token')->plainTextToken;
-        $this->withHeaders(['Authorization' => "Bearer $token"]);
-
-        // 1. Seed the cache by querying first.
-        $this->graphQL('query { documents { paginatorInfo { total } } }');
-
-        // The versioned key (v1) should exist after the first query.
-        $versionedKey = "documents.user.{$user->id}.v1.page.1.per.10";
-        $versionKey   = "documents.user.{$user->id}.version";
-        $this->assertTrue(Cache::has($versionedKey), 'Versioned cache key should exist before upload.');
+        $versionKey = "documents.user.{$user->id}.version";
 
         // 2. Upload a new document — fires DocumentUploaded → InvalidateDocumentsCache.
         $file = UploadedFile::fake()->createWithContent('new.pdf', '%PDF-1.4 Fake PDF Content');
@@ -282,6 +288,9 @@ class DocumentTest extends TestCase
      */
     public function test_rejects_pure_php_file_with_spoofed_pdf_mime_type(): void
     {
+        Storage::fake('local');
+        Bus::fake();
+
         $user = User::factory()->create();
         $token = $user->createToken('test-token')->plainTextToken;
         $this->withHeaders(['Authorization' => "Bearer $token"]);
@@ -306,6 +315,9 @@ class DocumentTest extends TestCase
      */
     public function test_polyglot_file_is_rejected_by_finfo(): void
     {
+        Storage::fake('local');
+        Bus::fake();
+
         $user = User::factory()->create();
         $token = $user->createToken('test-token')->plainTextToken;
         $this->withHeaders(['Authorization' => "Bearer $token"]);
@@ -353,5 +365,30 @@ class DocumentTest extends TestCase
         // Str::slug() should have stripped out the slashes, dots, and null bytes completely.
         $this->assertStringNotContainsString('../', $document->file_path);
         $this->assertStringNotContainsString('\0', $document->file_path);
+    }
+
+    /**
+     * Test 11: ProcessDocumentJob invalidates cache when status changes.
+     */
+    public function test_process_document_job_invalidates_documents_cache(): void
+    {
+        $user = $this->authenticateAndSeedDocumentsCache(1);
+        $document = Document::first();
+        
+        $versionKey = "documents.user.{$user->id}.version";
+        
+        $initialVersion = (int) Cache::get($versionKey, 1);
+        Cache::put($versionKey, $initialVersion);
+        
+        // Execute the job synchronously to simulate worker behavior
+        $job = new ProcessDocumentJob($document);
+        $job->handle();
+
+        // The job calls updateProgress 4 times (extracting, chunking, embedding, ready),
+        // each of which should increment the cache version.
+        $newVersion = (int) Cache::get($versionKey, 1);
+        
+        $this->assertGreaterThan($initialVersion, $newVersion, 'The cache version must increment when the document status changes during processing.');
+        $this->assertEquals($initialVersion + 4, $newVersion, 'The cache version should have incremented 4 times for the 4 status changes.');
     }
 }

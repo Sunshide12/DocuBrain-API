@@ -18,7 +18,8 @@ class ConversationTest extends TestCase
         $user = User::factory()->create();
         $document = Document::factory()->create(['user_id' => $user->id, 'original_name' => 'test.pdf']);
 
-        $this->actingAs($user);
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
 
         $response = $this->graphQL('
             mutation ($document_id: ID!) {
@@ -48,7 +49,8 @@ class ConversationTest extends TestCase
     public function test_can_create_global_conversation()
     {
         $user = User::factory()->create();
-        $this->actingAs($user);
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
 
         $response = $this->graphQL('
             mutation {
@@ -83,7 +85,8 @@ class ConversationTest extends TestCase
 
         $conversation = Conversation::factory()->create(['user_id' => $user1->id]);
 
-        $this->actingAs($user2);
+        $token = $user2->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
 
         $response = $this->graphQL('
             query ($id: ID!) {
@@ -101,7 +104,8 @@ class ConversationTest extends TestCase
         $user = User::factory()->create();
         $conversation = Conversation::factory()->create(['user_id' => $user->id]);
 
-        $this->actingAs($user);
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
 
         $response = $this->graphQL('
             mutation ($id: ID!) {

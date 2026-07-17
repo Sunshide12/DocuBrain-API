@@ -192,10 +192,10 @@ class DocumentChunkTest extends TestCase
     {
         $user = User::factory()->create();
 
-        // Creamos 3 documentos con 5 chunks cada uno
+        // Creamos 3 documentos con 25 chunks cada uno
         $documents = Document::factory(3)->create(['user_id' => $user->id]);
         foreach ($documents as $i => $doc) {
-            DocumentChunk::factory(5)->sequence(
+            DocumentChunk::factory(25)->sequence(
                 fn ($seq) => ['chunk_index' => $seq->index, 'document_id' => $doc->id]
             )->create(['document_id' => $doc->id]);
         }
@@ -208,7 +208,7 @@ class DocumentChunkTest extends TestCase
 
         $response = $this->graphQL(/** @lang GraphQL */ '
             query GetChunks($documentId: ID!) {
-                chunks(document_id: $documentId, first: 10) {
+                chunks(document_id: $documentId, first: 20) {
                     data {
                         id
                         chunk_index
@@ -222,7 +222,7 @@ class DocumentChunkTest extends TestCase
         $queries = DB::getQueryLog();
         DB::disableQueryLog();
 
-        $response->assertJsonPath('data.chunks.paginatorInfo.total', 5);
+        $response->assertJsonPath('data.chunks.paginatorInfo.total', 25);
 
         // Una consulta de chunks hace como máximo:
         //   1 query Sanctum: SELECT personal_access_tokens (autenticación)
