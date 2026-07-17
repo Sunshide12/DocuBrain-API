@@ -19,6 +19,17 @@ class MessageTest extends TestCase
 
         $this->actingAs($user);
 
+        $this->mock(\App\Services\Contracts\EmbeddingProvider::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('embed')->andReturn(array_fill(0, 1536, 0.1));
+        });
+
+        $this->mock(\App\Services\Contracts\AnswerGenerator::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('generate')->andReturn(new \App\DTOs\AnswerResult(
+                answer: 'Respuesta simulada',
+                sourceChunks: []
+            ));
+        });
+
         $response = $this->graphQL('
             mutation ($conversation_id: ID!, $content: String!) {
                 sendMessage(conversation_id: $conversation_id, content: $content) {
