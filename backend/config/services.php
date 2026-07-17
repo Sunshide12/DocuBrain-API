@@ -35,4 +35,16 @@ return [
         ],
     ],
 
+    'openrouter' => [
+        'api_key' => env('OPENROUTER_API_KEY'),
+        'base_url' => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+        'embedding_model' => env('EMBEDDING_MODEL', 'openai/text-embedding-3-small'),
+        'llm_model' => env('LLM_MODEL', 'openai/gpt-4o-mini'),
+        'similarity_threshold' => (float) env('SIMILARITY_THRESHOLD', 0.5),
+    ],
+
+    'document_processing' => [
+        'timeout' => (int) env('PROCESS_DOCUMENT_TIMEOUT', 300),
+    ],
+
 ];

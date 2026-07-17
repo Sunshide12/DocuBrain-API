@@ -187,12 +187,17 @@ type Conversation {
 }
 
 "A single message in a conversation."
+type SourceChunk {
+    id: Int!
+    page_number: Int
+}
+
 type Message {
     id: ID!
     conversation: Conversation! @belongsTo
     role: String!
     content: String!
-    source_chunk_ids: [Int!]
+    source_chunks: [SourceChunk!] @rename(attribute: "source_chunk_ids")
     prompt_tokens: Int
     completion_tokens: Int
     created_at: DateTime!

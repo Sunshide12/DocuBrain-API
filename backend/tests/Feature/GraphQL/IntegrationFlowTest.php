@@ -26,6 +26,13 @@ class IntegrationFlowTest extends TestCase
         // y phpunit.xml a veces no logra sobreescribirlo a nivel de sistema.
         config(['queue.default' => 'sync']);
 
+        $this->mock(\App\Services\Contracts\TextExtractor::class, function ($mock) {
+            $mock->shouldReceive('extract')->andReturn([1 => 'Fake extracted text']);
+        });
+        $this->mock(\App\Services\Contracts\EmbeddingProvider::class, function ($mock) {
+            $mock->shouldReceive('embedBatch')->andReturn([array_fill(0, 1536, 0.1)]);
+        });
+
         // 1. Registrar un usuario
         $registerMutation = '
             mutation Register($input: RegisterInput!) {

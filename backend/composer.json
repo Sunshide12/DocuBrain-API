@@ -11,7 +11,9 @@
         "laravel/reverb": "^1.10",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
-        "nuwave/lighthouse": "^6.68"
+        "nuwave/lighthouse": "^6.68",
+        "pgvector/pgvector": "^0.2.2",
+        "spatie/pdf-to-text": "^1.55"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

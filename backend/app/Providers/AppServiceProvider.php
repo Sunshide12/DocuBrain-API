@@ -17,7 +17,18 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(
+            \App\Services\Contracts\TextExtractor::class,
+            \App\Services\PdfTextExtractor::class
+        );
+        $this->app->bind(
+            \App\Services\Contracts\EmbeddingProvider::class,
+            \App\Services\OpenRouterEmbeddingProvider::class
+        );
+        $this->app->bind(
+            \App\Services\Contracts\AnswerGenerator::class,
+            \App\Services\OpenRouterAnswerGenerator::class
+        );
     }
 
     /**

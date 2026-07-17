@@ -372,6 +372,12 @@ class DocumentTest extends TestCase
      */
     public function test_process_document_job_invalidates_documents_cache(): void
     {
+        $this->mock(\App\Services\Contracts\TextExtractor::class, function ($mock) {
+            $mock->shouldReceive('extract')->andReturn([1 => 'Fake extracted text']);
+        });
+        $this->mock(\App\Services\Contracts\EmbeddingProvider::class, function ($mock) {
+            $mock->shouldReceive('embedBatch')->andReturn([array_fill(0, 1536, 0.1)]);
+        });
         $user = $this->authenticateAndSeedDocumentsCache(1);
         $document = Document::first();
         
@@ -382,7 +388,7 @@ class DocumentTest extends TestCase
         
         // Execute the job synchronously to simulate worker behavior
         $job = new ProcessDocumentJob($document);
-        $job->handle();
+        app()->call([$job, 'handle']);
 
         // The job calls updateProgress 4 times (extracting, chunking, embedding, ready),
         // each of which should increment the cache version.

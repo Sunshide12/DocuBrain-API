@@ -6,58 +6,73 @@ namespace App\Jobs;
 
 use App\Events\DocumentProgressUpdated;
 use App\Models\Document;
+use App\Models\DocumentChunk;
+use App\Services\Contracts\EmbeddingProvider;
+use App\Services\Contracts\TextExtractor;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Storage;
 
-/**
- * Processes a document through the pipeline:
- *   extracting → chunking → embedding → ready
- *
- * In Fase 4 the heavy work is STUBBED — each step sleeps briefly
- * and publishes a progress event to the Redis channel
- * `docubrain.document.{id}` (Pub/Sub).
- *
- * Real PDF extraction + embeddings will be wired in Fase 8.
- *
- * What Redis actually does here:
- *  - Queue driver:   the job payload itself lives in Redis (a list)
- *  - Pub/Sub:        progress events are published via Redis::publish()
- */
 final class ProcessDocumentJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    /** Number of times the job may be attempted. */
     public int $tries = 3;
-
-    /** Number of seconds to wait before retrying after a failure. */
     public int $backoff = 10;
+    public int $timeout = 300;
 
     public function __construct(
         public readonly Document $document,
-    ) {}
+    ) {
+        $this->timeout = config('services.document_processing.timeout', 300);
+    }
 
-    public function handle(): void
+    public function handle(TextExtractor $textExtractor, EmbeddingProvider $embeddingProvider): void
     {
         try {
-            // Step 1 — extracting text
+            // Idempotencia: Limpiar chunks previos para que el job sea re-ejecutable
+            $this->document->chunks()->delete();
+
+            // Paso 1 — Extracting
             $this->updateProgress('extracting', 'Extracting text from PDF…', 10);
-            $this->simulateWork();
+            $pages = $textExtractor->extract(
+                Storage::path($this->document->file_path)
+            );
 
-            // Step 2 — chunking
+            // Paso 2 — Chunking
             $this->updateProgress('chunking', 'Splitting text into chunks…', 40);
-            $this->simulateWork();
+            $chunks = $this->chunkTextByPage($pages, 375, 37);
+            
+            foreach ($chunks as $chunk) {
+                if (str_word_count($chunk['content']) > 6000) {
+                    Log::warning("Chunk excepcionalmente largo detectado", ['document_id' => $this->document->id]);
+                }
+            }
 
-            // Step 3 — generating embeddings (stub — real work in Fase 8)
-            $this->updateProgress('embedding', 'Generating embeddings (stub)…', 75);
-            $this->simulateWork();
+            // Paso 3 — Embedding
+            $this->updateProgress('embedding', 'Generating embeddings…', 75);
+            $vectors = $embeddingProvider->embedBatch(
+                array_column($chunks, 'content')
+            );
 
-            // Step 4 — done
+            $rows = array_map(function($chunk, $vector) {
+                return [
+                    'document_id' => $this->document->id,
+                    'chunk_index' => $chunk['index'],
+                    'content'     => $chunk['content'],
+                    'token_count' => $chunk['word_count'],
+                    'page_number' => $chunk['page_number'],
+                    'embedding'   => (new \Pgvector\Laravel\Vector($vector))->__toString(),
+                ];
+            }, $chunks, $vectors);
+
+            DocumentChunk::insert($rows);
+
+            // Paso 4 — Done
             $this->document->update(['status' => 'ready']);
             $this->updateProgress('ready', 'Document is ready.', 100);
 
@@ -75,39 +90,17 @@ final class ProcessDocumentJob implements ShouldQueue
                 'error'       => $e->getMessage(),
             ]);
 
-            // Re-throw so Laravel can record the failure and retry
             throw $e;
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Private helpers
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Publish a progress event to the Redis Pub/Sub channel.
-     *
-     * Channel pattern: docubrain.document.{id}
-     *
-     * A Redis subscriber (redis-cli SUBSCRIBE / the Fase-6 WebSocket server)
-     * can listen to this channel in real time.
-     *
-     * WHY Redis::publish and not a Laravel event?
-     * Redis::publish goes DIRECTLY to the Pub/Sub bus — any subscriber connected
-     * to Redis (even outside of PHP) receives it immediately.
-     * A normal Laravel event only runs within the current PHP process.
-     */
     private function updateProgress(string $status, string $message, int $progress): void
     {
-        // Log to terminal so we can see the steps taking place
         Log::info("Document {$this->document->id} is now in step: {$status}");
-        // Save the intermediate state in the database
         $this->document->update(['status' => $status]);
 
-        // Invalidate the GraphQL queries cache so that reloads show the new status
         \Illuminate\Support\Facades\Cache::increment("documents.user.{$this->document->user_id}.version");
 
-        // Dispatch the standard Laravel broadcast event
         try {
             DocumentProgressUpdated::dispatch(
                 $this->document->id,
@@ -116,23 +109,71 @@ final class ProcessDocumentJob implements ShouldQueue
                 $message,
                 $progress
             );
-            Log::info("Broadcast dispatched for status: {$status}");
         } catch (\Throwable $e) {
             Log::error("Failed to broadcast: " . $e->getMessage());
         }
     }
 
-    /**
-     * Simulates CPU/IO work.
-     * Replaced by real logic in Fase 8.
-     * Skipped when `APP_ENV=testing` to keep the test suite fast.
-     */
-    private function simulateWork(): void
+    private function chunkTextByPage(array $pages, int $wordsPerChunk, int $overlapWords): array
     {
-        if (app()->environment('testing')) {
-            return;
+        $chunks = [];
+        $chunkIndex = 0;
+
+        foreach ($pages as $pageNumber => $text) {
+            // Split text keeping spaces and newlines
+            $tokens = preg_split('/(\s+)/', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+            
+            $allWordsAndSpaces = [];
+            foreach ($tokens as $token) {
+                if ($token === '') continue;
+                $isSpace = preg_match('/^\s+$/', $token) === 1;
+                $allWordsAndSpaces[] = ['text' => $token, 'is_space' => $isSpace];
+            }
+
+            $i = 0;
+            while ($i < count($allWordsAndSpaces)) {
+                $chunkStartIdx = $i;
+                $wordsInThisChunk = 0;
+                $chunkText = '';
+
+                while ($i < count($allWordsAndSpaces) && $wordsInThisChunk < $wordsPerChunk) {
+                    $item = $allWordsAndSpaces[$i];
+                    $chunkText .= $item['text'];
+                    if (!$item['is_space']) {
+                        $wordsInThisChunk++;
+                    }
+                    $i++;
+                }
+                
+                $chunkContent = trim($chunkText);
+                if (!empty($chunkContent)) {
+                    $chunks[] = [
+                        'index' => $chunkIndex++,
+                        'page_number' => $pageNumber,
+                        'content' => $chunkContent,
+                        'word_count' => count(explode(' ', preg_replace('/\s+/', ' ', $chunkContent))),
+                    ];
+                }
+
+                if ($i < count($allWordsAndSpaces)) {
+                    $overlapCount = 0;
+                    $i--; // Step back to last added item
+                    while ($i > $chunkStartIdx && $overlapCount < $overlapWords) {
+                        if (!$allWordsAndSpaces[$i]['is_space']) {
+                            $overlapCount++;
+                        }
+                        if ($overlapCount < $overlapWords) {
+                            $i--;
+                        }
+                    }
+                    // Prevent infinite loops if word is too long
+                    if ($i <= $chunkStartIdx) {
+                        $i = $chunkStartIdx + 1; // force advance at least 1 word/space
+                    }
+                }
+            }
         }
 
-        sleep(1);
+        return $chunks;
     }
 }

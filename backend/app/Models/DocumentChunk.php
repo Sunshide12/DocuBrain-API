@@ -34,6 +34,7 @@ class DocumentChunk extends Model
         'content',
         'token_count',
         'page_number',
+        'embedding',
     ];
 
     protected function casts(): array
@@ -42,11 +43,30 @@ class DocumentChunk extends Model
             'chunk_index' => 'integer',
             'token_count' => 'integer',
             'page_number' => 'integer',
+            'embedding' => \Pgvector\Laravel\Vector::class,
         ];
     }
 
     public function document(): BelongsTo
     {
         return $this->belongsTo(Document::class);
+    }
+
+    /**
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param array $vector
+     * @param float $threshold
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeSimilarTo($query, array $vector, float $threshold)
+    {
+        // Cosine distance <=> 
+        // Similitud = 1 - distancia. Si queremos >= threshold, entonces distancia <= 1 - threshold
+        return $query->whereRaw('embedding <=> ? <= ?', [
+            (new \Pgvector\Laravel\Vector($vector))->__toString(),
+            1 - $threshold
+        ])->orderByRaw('embedding <=> ?', [
+            (new \Pgvector\Laravel\Vector($vector))->__toString()
+        ]);
     }
 }

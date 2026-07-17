@@ -54,7 +54,7 @@ class ProcessDocumentJobTest extends TestCase
     }
 
     /**
-     * Test 2: The job handle() method updates the document status to 'ready'.
+     * Test 2: The app()->call([$job, 'handle']); method updates the document status to 'ready'.
      *
      * We call handle() directly (no queue involved) to test the job logic.
      * Redis::spy() catches the Redis::publish() calls silently.
@@ -62,11 +62,21 @@ class ProcessDocumentJobTest extends TestCase
     public function test_job_processes_document_and_sets_status_ready(): void
     {
         Redis::spy();
+        \Illuminate\Support\Facades\Storage::fake('local');
+        \Illuminate\Support\Facades\Storage::disk('local')->put('dummy.pdf', 'fake');
 
-        $document = Document::factory()->create(['status' => 'pending']);
+        $document = Document::factory()->create(['status' => 'pending', 'file_path' => 'dummy.pdf']);
+
+        $this->mock(\App\Services\Contracts\TextExtractor::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('extract')->andReturn([1 => 'fake text']);
+        });
+
+        $this->mock(\App\Services\Contracts\EmbeddingProvider::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('embedBatch')->andReturn([array_fill(0, 1536, 0.1)]);
+        });
 
         $job = new ProcessDocumentJob($document);
-        $job->handle();
+        app()->call([$job, 'handle']);
 
         $this->assertDatabaseHas('documents', [
             'id'     => $document->id,
@@ -80,11 +90,21 @@ class ProcessDocumentJobTest extends TestCase
     public function test_job_publishes_progress_events_to_redis(): void
     {
         Event::fake([\App\Events\DocumentProgressUpdated::class]);
+        \Illuminate\Support\Facades\Storage::fake('local');
+        \Illuminate\Support\Facades\Storage::disk('local')->put('dummy.pdf', 'fake');
 
-        $document = Document::factory()->create(['status' => 'pending']);
+        $document = Document::factory()->create(['status' => 'pending', 'file_path' => 'dummy.pdf']);
+
+        $this->mock(\App\Services\Contracts\TextExtractor::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('extract')->andReturn([1 => 'fake text']);
+        });
+
+        $this->mock(\App\Services\Contracts\EmbeddingProvider::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('embedBatch')->andReturn([array_fill(0, 1536, 0.1)]);
+        });
 
         $job = new ProcessDocumentJob($document);
-        $job->handle();
+        app()->call([$job, 'handle']);
 
         Event::assertDispatched(\App\Events\DocumentProgressUpdated::class, function ($event) use ($document) {
             return $event->documentId === $document->id 
@@ -98,10 +118,20 @@ class ProcessDocumentJobTest extends TestCase
     public function test_job_publishes_ready_event_as_last_step(): void
     {
         Event::fake([\App\Events\DocumentProgressUpdated::class]);
+        \Illuminate\Support\Facades\Storage::fake('local');
+        \Illuminate\Support\Facades\Storage::disk('local')->put('dummy.pdf', 'fake');
 
-        $document = Document::factory()->create(['status' => 'pending']);
+        $document = Document::factory()->create(['status' => 'pending', 'file_path' => 'dummy.pdf']);
 
-        (new ProcessDocumentJob($document))->handle();
+        $this->mock(\App\Services\Contracts\TextExtractor::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('extract')->andReturn([1 => 'fake text']);
+        });
+
+        $this->mock(\App\Services\Contracts\EmbeddingProvider::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('embedBatch')->andReturn([array_fill(0, 1536, 0.1)]);
+        });
+
+        app()->call([new ProcessDocumentJob($document), 'handle']);
 
         Event::assertDispatched(\App\Events\DocumentProgressUpdated::class, function ($event) use ($document) {
             return $event->documentId === $document->id 
