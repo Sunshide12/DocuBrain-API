@@ -16,6 +16,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Pgvector\Laravel\Vector;
 
 final class ProcessDocumentJob implements ShouldQueue
 {
@@ -66,7 +67,7 @@ final class ProcessDocumentJob implements ShouldQueue
                     'content'     => $chunk['content'],
                     'token_count' => $chunk['word_count'],
                     'page_number' => $chunk['page_number'],
-                    'embedding'   => (new \Pgvector\Laravel\Vector($vector))->__toString(),
+                    'embedding'   => (new Vector($vector))->__toString(),
                 ];
             }, $chunks, $vectors);
 
