@@ -25,6 +25,12 @@ type Query {
 
     "Returns a specific conversation by ID."
     conversation(id: ID! @eq): Conversation @find @guard(with: ["sanctum"])
+
+    "Returns aggregated statistics for the authenticated user."
+    userStats: UserStats!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Queries\\UserStats")
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -110,6 +116,18 @@ type AuthPayload {
 type LogoutResponse {
     "Confirmation message."
     message: String!
+}
+
+"Aggregated statistics for the current user."
+type UserStats {
+    "Total number of documents uploaded by the user."
+    totalDocuments: Int!
+
+    "Number of documents with status 'ready'."
+    documentsReady: Int!
+
+    "Total number of conversations started by the user."
+    totalConversations: Int!
 }
 
 "An uploaded document."

@@ -78,6 +78,56 @@ class ConversationTest extends TestCase
         $this->assertNull($response->json('data.createConversation.document'));
     }
 
+    public function test_creating_conversation_twice_for_same_document_reuses_existing_one()
+    {
+        $user = User::factory()->create();
+        $document = Document::factory()->create(['user_id' => $user->id, 'original_name' => 'test.pdf']);
+
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        $query = '
+            mutation ($document_id: ID!) {
+                createConversation(document_id: $document_id) {
+                    id
+                }
+            }
+        ';
+
+        $first = $this->graphQL($query, ['document_id' => $document->id]);
+        $second = $this->graphQL($query, ['document_id' => $document->id]);
+
+        $this->assertEquals(
+            $first->json('data.createConversation.id'),
+            $second->json('data.createConversation.id')
+        );
+        $this->assertDatabaseCount('conversations', 1);
+    }
+
+    public function test_creating_global_conversation_twice_reuses_existing_one()
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        $query = '
+            mutation {
+                createConversation {
+                    id
+                }
+            }
+        ';
+
+        $first = $this->graphQL($query);
+        $second = $this->graphQL($query);
+
+        $this->assertEquals(
+            $first->json('data.createConversation.id'),
+            $second->json('data.createConversation.id')
+        );
+        $this->assertDatabaseCount('conversations', 1);
+    }
+
     public function test_cannot_access_other_users_conversation()
     {
         $user1 = User::factory()->create();
