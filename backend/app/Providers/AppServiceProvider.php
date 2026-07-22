@@ -57,5 +57,10 @@ class AppServiceProvider extends ServiceProvider
 
         // Invalidate the documents cache whenever a document finishes processing.
         Event::listen(\App\Events\DocumentProcessed::class, \App\Listeners\InvalidateDocumentCacheOnCompletion::class);
+
+        // Auto-generate a quiz when a document finishes processing.
+        Event::listen(\App\Events\DocumentProcessed::class, function (\App\Events\DocumentProcessed $event) {
+            \App\Jobs\GenerateAutoQuizJob::dispatch($event->document);
+        });
     }
 }

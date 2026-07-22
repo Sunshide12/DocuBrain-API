@@ -37,4 +37,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(Document::class);
     }
+
+    public function quizzes(): HasMany
+    {
+        return $this->hasMany(\App\Models\Quiz::class);
+    }
 }

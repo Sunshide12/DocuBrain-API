@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Events\DocumentProcessed;
 use App\Events\DocumentProgressUpdated;
 use App\Models\Document;
 use App\Models\DocumentChunk;
@@ -75,6 +76,7 @@ final class ProcessDocumentJob implements ShouldQueue
 
             // Paso 4 — Done
             $this->document->update(['status' => 'ready']);
+            DocumentProcessed::dispatch($this->document);
             $this->updateProgress('ready', 'Document is ready.', 100);
 
             Log::info('ProcessDocumentJob completed', ['document_id' => $this->document->id]);

@@ -62,4 +62,9 @@ class Document extends Model
     {
         return $this->hasMany(DocumentMathPage::class)->orderBy('page_number');
     }
+
+    public function quizzes(): HasMany
+    {
+        return $this->hasMany(\App\Models\Quiz::class)->orderByDesc('created_at');
+    }
 }

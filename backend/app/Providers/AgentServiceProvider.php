@@ -16,7 +16,6 @@ class AgentServiceProvider extends ServiceProvider
     {
         $registry->register($this->app->make(\App\Agents\DocumentQAAgent::class));
         $registry->register($this->app->make(\App\Agents\MathSolverAgent::class));
-        // Future agents registered here:
-        // $registry->register($this->app->make(\App\Agents\QuizGeneratorAgent::class));
+        $registry->register($this->app->make(\App\Agents\QuizGeneratorAgent::class));
     }
 }

@@ -36,6 +36,12 @@ type Query {
     availableAgents: [AgentInfo!]!
         @guard(with: ["sanctum"])
         @field(resolver: "App\\GraphQL\\Queries\\AvailableAgents")
+
+    "Returns all quizzes for a given document, scoped to the authenticated user."
+    documentQuizzes(document_id: ID!): [Quiz!]!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Queries\\DocumentQuizzes")
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -235,6 +241,29 @@ type AgentInfo {
     key: String!
     name: String!
     description: String!
+}
+
+"A quiz auto-generated from a document."
+type Quiz {
+    id: ID!
+    document: Document! @belongsTo
+    title: String!
+    status: String!
+    error_message: String
+    questions: [QuizQuestion!]! @hasMany(defaultCount: 100)
+    created_at: DateTime!
+}
+
+"A single question within a quiz."
+type QuizQuestion {
+    id: ID!
+    question: String!
+    type: String!
+    options: [String!]
+    correct_answer: String!
+    explanation: String
+    page_number: Int
+    sort_order: Int!
 }
 
 "Payload for document progress updates."
