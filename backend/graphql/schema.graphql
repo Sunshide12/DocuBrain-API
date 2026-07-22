@@ -31,6 +31,11 @@ type Query {
         @guard(with: ["sanctum"])
         @throttle(name: "api")
         @field(resolver: "App\\GraphQL\\Queries\\UserStats")
+
+    "Returns the list of agents available to start a conversation with."
+    availableAgents: [AgentInfo!]!
+        @guard(with: ["sanctum"])
+        @field(resolver: "App\\GraphQL\\Queries\\AvailableAgents")
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,7 +60,7 @@ type Mutation {
 
 
     "Create a new conversation. If document_id is null, it's a library-wide search."
-    createConversation(document_id: ID, title: String): Conversation!
+    createConversation(document_id: ID, title: String, agent_type: String): Conversation!
         @guard(with: ["sanctum"])
         @throttle(name: "api")
         @field(resolver: "App\\GraphQL\\Mutations\\CreateConversation")
@@ -197,6 +202,7 @@ type DocumentChunkPaginator {
 type Conversation {
     id: ID!
     document: Document @belongsTo
+    agent_type: String!
     title: String!
     total_tokens: Int!
     messages: [Message!]! @hasMany
@@ -216,10 +222,19 @@ type Message {
     role: String!
     content: String!
     source_chunks: [SourceChunk!] @rename(attribute: "source_chunk_ids")
+    response_type: String
+    metadata: String
     prompt_tokens: Int
     completion_tokens: Int
     created_at: DateTime!
     updated_at: DateTime!
+}
+
+"Describes an agent available for conversations."
+type AgentInfo {
+    key: String!
+    name: String!
+    description: String!
 }
 
 "Payload for document progress updates."

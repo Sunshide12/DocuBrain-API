@@ -25,10 +25,6 @@ class AppServiceProvider extends ServiceProvider
             \App\Services\Contracts\EmbeddingProvider::class,
             \App\Services\OpenRouterEmbeddingProvider::class
         );
-        $this->app->bind(
-            \App\Services\Contracts\AnswerGenerator::class,
-            \App\Services\OpenRouterAnswerGenerator::class
-        );
     }
 
     /**

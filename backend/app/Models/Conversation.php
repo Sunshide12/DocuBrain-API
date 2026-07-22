@@ -17,6 +17,7 @@ class Conversation extends Model
     protected $fillable = [
         'user_id',
         'document_id',
+        'agent_type',
         'title',
         'total_tokens',
     ];

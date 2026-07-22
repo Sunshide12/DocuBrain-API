@@ -16,12 +16,15 @@ class Message extends Model
         'role',
         'content',
         'source_chunk_ids',
+        'response_type',
+        'metadata',
         'prompt_tokens',
         'completion_tokens',
     ];
 
     protected $casts = [
         'source_chunk_ids' => 'array',
+        'metadata'         => 'array',
     ];
 
     public function conversation(): BelongsTo
