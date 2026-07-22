@@ -15,8 +15,8 @@ class AgentServiceProvider extends ServiceProvider
     public function boot(AgentRegistry $registry): void
     {
         $registry->register($this->app->make(\App\Agents\DocumentQAAgent::class));
+        $registry->register($this->app->make(\App\Agents\MathSolverAgent::class));
         // Future agents registered here:
-        // $registry->register($this->app->make(\App\Agents\MathSolverAgent::class));
         // $registry->register($this->app->make(\App\Agents\QuizGeneratorAgent::class));
     }
 }

@@ -34,6 +34,11 @@ class Document extends Model
         'size',
         'status',
         'error_message',
+        'math_extracted_at',
+    ];
+
+    protected $casts = [
+        'math_extracted_at' => 'datetime',
     ];
 
     public function user(): BelongsTo
@@ -51,5 +56,10 @@ class Document extends Model
     public function chunks(): HasMany
     {
         return $this->hasMany(DocumentChunk::class)->orderBy('chunk_index');
+    }
+
+    public function mathPages(): HasMany
+    {
+        return $this->hasMany(DocumentMathPage::class)->orderBy('page_number');
     }
 }
