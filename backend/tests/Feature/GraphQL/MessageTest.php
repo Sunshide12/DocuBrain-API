@@ -2,9 +2,13 @@
 
 namespace Tests\Feature\GraphQL;
 
+use App\Agents\AgentRegistry;
+use App\DTOs\AgentResponse;
 use App\Models\Conversation;
 use App\Models\User;
+use App\Services\Contracts\AgentHandler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery\MockInterface;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
 use Tests\TestCase;
 
@@ -14,20 +18,17 @@ class MessageTest extends TestCase
 
     public function test_can_send_message()
     {
-        $user = User::factory()->create();
+        $user         = User::factory()->create();
         $conversation = Conversation::factory()->create(['user_id' => $user->id]);
 
         $this->actingAs($user);
 
-        $this->mock(\App\Services\Contracts\EmbeddingProvider::class, function (\Mockery\MockInterface $mock) {
-            $mock->shouldReceive('embed')->andReturn(array_fill(0, 1536, 0.1));
-        });
-
-        $this->mock(\App\Services\Contracts\AnswerGenerator::class, function (\Mockery\MockInterface $mock) {
-            $mock->shouldReceive('generate')->andReturn(new \App\DTOs\AnswerResult(
-                answer: 'Respuesta simulada',
-                sourceChunks: []
-            ));
+        $this->mock(AgentRegistry::class, function (MockInterface $mock) {
+            $fakeAgent = \Mockery::mock(AgentHandler::class);
+            $fakeAgent->shouldReceive('handle')->andReturn(
+                new AgentResponse(answer: 'Respuesta simulada')
+            );
+            $mock->shouldReceive('resolve')->with('document_qa')->andReturn($fakeAgent);
         });
 
         $response = $this->graphQL('
@@ -40,33 +41,26 @@ class MessageTest extends TestCase
             }
         ', [
             'conversation_id' => $conversation->id,
-            'content' => 'Hola IA'
+            'content'         => 'Hola IA',
         ]);
 
-        // Should return the assistant message
         $response->assertJsonStructure([
             'data' => [
-                'sendMessage' => [
-                    'id',
-                    'role',
-                    'content'
-                ]
-            ]
+                'sendMessage' => ['id', 'role', 'content'],
+            ],
         ]);
 
         $this->assertEquals('assistant', $response->json('data.sendMessage.role'));
-        
-        // Assert user message is in database
+
         $this->assertDatabaseHas('messages', [
             'conversation_id' => $conversation->id,
-            'role' => 'user',
-            'content' => 'Hola IA',
+            'role'            => 'user',
+            'content'         => 'Hola IA',
         ]);
-        
-        // Assert assistant message is in database
+
         $this->assertDatabaseHas('messages', [
             'conversation_id' => $conversation->id,
-            'role' => 'assistant',
+            'role'            => 'assistant',
         ]);
     }
 }

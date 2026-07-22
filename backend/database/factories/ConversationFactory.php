@@ -15,9 +15,10 @@ class ConversationFactory extends Factory
     public function definition(): array
     {
         return [
-            'user_id' => User::factory(),
+            'user_id'    => User::factory(),
             'document_id' => null,
-            'title' => $this->faker->sentence(3),
+            'agent_type' => 'document_qa',
+            'title'      => $this->faker->sentence(3),
             'total_tokens' => $this->faker->numberBetween(0, 5000),
         ];
     }
