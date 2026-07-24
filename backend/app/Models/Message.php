@@ -24,7 +24,6 @@ class Message extends Model
 
     protected $casts = [
         'source_chunk_ids' => 'array',
-        'metadata'         => 'array',
     ];
 
     public function conversation(): BelongsTo

@@ -36,11 +36,11 @@ class SendMessage
         $result = $agent->handle($context);
 
         return $conversation->messages()->create([
-            'role'            => 'assistant',
-            'content'         => $result->answer,
+            'role'             => 'assistant',
+            'content'          => $result->answer,
             'source_chunk_ids' => $result->sourceChunks,
-            'response_type'   => $result->responseType,
-            'metadata'        => $result->metadata ?: null,
+            'response_type'    => $result->responseType,
+            'metadata'         => $result->metadata ? json_encode($result->metadata) : null,
         ]);
     }
 }

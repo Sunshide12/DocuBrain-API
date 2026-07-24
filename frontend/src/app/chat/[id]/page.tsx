@@ -17,6 +17,7 @@ import { ChatMobileTabs, type ChatMobileView } from "@/components/chat/chat-mobi
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { TypingIndicator } from "@/components/chat/typing-indicator";
 import { QuizPanel } from "@/components/quiz/QuizPanel";
+import { AgentSwitcher } from "@/components/agents/AgentSwitcher";
 
 const CONVERSATION_QUERY = gql`
   query GetConversation($id: ID!) {
@@ -53,12 +54,6 @@ const SEND_MESSAGE_MUTATION = gql`
   }
 `;
 
-const AGENT_LABELS: Record<string, { label: string; color: string }> = {
-  document_qa:    { label: "Document Q&A",  color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
-  math_solver:    { label: "Math Solver",   color: "bg-orange-500/10 text-orange-600 dark:text-orange-400" },
-  quiz_generator: { label: "Quiz Generator", color: "bg-green-500/10 text-green-600 dark:text-green-400" },
-};
-
 export default function ChatPage() {
   const params = useParams();
   const conversationId = params.id as string;
@@ -67,7 +62,9 @@ export default function ChatPage() {
   const queryClient = useQueryClient();
   const [content, setContent] = useState("");
   const [activeMobileView, setActiveMobileView] = useState<ChatMobileView>("chat");
+  const [quizGenerating, setQuizGenerating] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const quizToastShownRef = useRef<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: ["conversation", conversationId],
@@ -77,10 +74,11 @@ export default function ChatPage() {
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: (msg: string) => graphqlClient.request(SEND_MESSAGE_MUTATION, {
-      conversation_id: conversationId,
-      content: msg,
-    }),
+    mutationFn: (msg: string) =>
+      graphqlClient.request(SEND_MESSAGE_MUTATION, {
+        conversation_id: conversationId,
+        content: msg,
+      }),
     onMutate: async (newMsg) => {
       await queryClient.cancelQueries({ queryKey: ["conversation", conversationId] });
       const previousData: any = queryClient.getQueryData(["conversation", conversationId]);
@@ -123,6 +121,26 @@ export default function ChatPage() {
     setContent("");
   };
 
+  const handleAgentChanged = (newAgentType: string) => {
+    // Update local cache immediately so the UI reacts instantly
+    queryClient.setQueryData(["conversation", conversationId], (old: any) => {
+      if (!old) return old;
+      return {
+        ...old,
+        conversation: { ...old.conversation, agent_type: newAgentType },
+      };
+    });
+    // Auto-switch view based on new agent
+    if (newAgentType === "quiz_generator") {
+      setActiveMobileView("quizzes");
+      // Will show generating state in QuizPanel until quiz is ready
+      setQuizGenerating(true);
+    } else {
+      setActiveMobileView("chat");
+      setQuizGenerating(false);
+    }
+  };
+
   // Listen for QuizGenerationCompleted broadcast event
   useEffect(() => {
     if (!user) return;
@@ -136,9 +154,15 @@ export default function ChatPage() {
 
         channel = echo.private(`App.Models.User.${user.id}`);
         channel.listen(".QuizGenerationCompleted", (e: { document_id: string; status: string }) => {
-          if (e?.status === "ready") {
-            toast.success("Study quiz is ready! Check the Quizzes tab.", { duration: 5000 });
+          const key = `${e?.document_id}-${e?.status}`;
+          if (e?.status === "ready" && !quizToastShownRef.current.has(key)) {
+            quizToastShownRef.current.add(key);
+            toast.success("¡El quiz está listo!", { duration: 4000 });
+            setQuizGenerating(false);
             queryClient.invalidateQueries({ queryKey: ["documentQuizzes"] });
+          }
+          if (e?.status === "failed") {
+            setQuizGenerating(false);
           }
         });
       } catch (err) {
@@ -160,6 +184,17 @@ export default function ChatPage() {
     }
   }, [data?.conversation?.messages, sendMessageMutation.isPending]);
 
+  // When conversation loads, set the correct initial mobile view
+  useEffect(() => {
+    const agentType = data?.conversation?.agent_type;
+    if (!agentType) return;
+    if (agentType === "quiz_generator") {
+      setActiveMobileView("quizzes");
+    } else {
+      setActiveMobileView("chat");
+    }
+  }, [data?.conversation?.agent_type]);
+
   if (!user) return <div className="flex h-screen items-center justify-center">Loading session...</div>;
   if (isLoading) return <div className="flex h-screen items-center justify-center">Loading conversation...</div>;
 
@@ -167,12 +202,13 @@ export default function ChatPage() {
   if (!conversation) return <div className="flex h-screen items-center justify-center">Conversation not found.</div>;
 
   const documentId = conversation.document?.id;
-  const agentInfo = AGENT_LABELS[conversation.agent_type] ?? null;
+  const agentType: string = conversation.agent_type ?? "document_qa";
+  const isQuizMode = agentType === "quiz_generator";
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background md:flex-row">
-      {/* Mobile bar: back + tab switcher */}
-      <div className="flex items-center gap-3 border-b border-border/50 bg-background px-3 py-2.5 md:hidden">
+      {/* ── Mobile top bar: back + tabs ── */}
+      <div className="flex items-center gap-2 border-b border-border/50 bg-background px-3 py-2 md:hidden">
         <Button
           variant="ghost"
           size="icon"
@@ -182,18 +218,29 @@ export default function ChatPage() {
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div className="flex-1">
-          <ChatMobileTabs active={activeMobileView} onChange={setActiveMobileView} />
+        <div className="flex-1 min-w-0">
+          <ChatMobileTabs
+            active={activeMobileView}
+            agentType={agentType}
+            onChange={setActiveMobileView}
+          />
         </div>
+        {/* Agent switcher on mobile too */}
+        <AgentSwitcher
+          conversationId={conversationId}
+          currentAgentType={agentType}
+          onAgentChanged={handleAgentChanged}
+        />
       </div>
 
-      {/* Left panel: PDF Viewer (45% desktop, mobile "document" tab only) */}
+      {/* ── Left panel: PDF Viewer ── */}
       <div
         className={cn(
           "w-full min-h-0 flex-1 flex-col border-r border-border/50 bg-muted/10 md:flex md:w-[45%] md:flex-initial",
           activeMobileView === "document" ? "flex" : "hidden"
         )}
       >
+        {/* Desktop back button */}
         <div className="hidden h-14 items-center border-b border-border/50 bg-background px-4 md:flex">
           <Button variant="ghost" size="sm" onClick={() => router.back()}>
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -204,7 +251,7 @@ export default function ChatPage() {
         <div className="flex-1 relative">
           {documentId ? (
             <iframe
-              src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/documents/${documentId}/download`}
+              src={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/documents/${documentId}/download`}
               className="absolute inset-0 w-full h-full border-0"
               title="PDF Viewer"
             />
@@ -216,46 +263,34 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Right panel: Chat or Quizzes (55% desktop) */}
+      {/* ── Right panel: Chat or Quizzes ── */}
       <div
         className={cn(
           "relative w-full min-h-0 flex-1 flex-col bg-background md:z-10 md:flex md:w-[55%] md:flex-initial md:shadow-2xl",
-          (activeMobileView === "chat" || activeMobileView === "quizzes") ? "flex" : "hidden"
+          activeMobileView === "chat" || activeMobileView === "quizzes" ? "flex" : "hidden"
         )}
       >
-        {/* Desktop header with agent badge + Chat/Quizzes toggle */}
+        {/* Desktop header */}
         <div className="hidden h-14 shrink-0 items-center justify-between border-b border-border/50 bg-background px-4 md:flex">
           <div className="flex items-center gap-2 min-w-0">
             <span className="font-semibold truncate">{conversation.title}</span>
-            {agentInfo && (
-              <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium", agentInfo.color)}>
-                {agentInfo.label}
-              </span>
-            )}
           </div>
-          {documentId && (
-            <div className="ml-4 flex shrink-0 items-center gap-1 rounded-full bg-muted p-1">
-              {(["chat", "quizzes"] as const).map((view) => (
-                <button
-                  key={view}
-                  type="button"
-                  onClick={() => setActiveMobileView(view)}
-                  className={cn(
-                    "rounded-full px-3 py-1 text-xs font-medium capitalize transition-colors",
-                    activeMobileView === view
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {view === "chat" ? "Chat" : "Quizzes"}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-3 shrink-0">
+            <AgentSwitcher
+              conversationId={conversationId}
+              currentAgentType={agentType}
+              onAgentChanged={handleAgentChanged}
+            />
+          </div>
         </div>
 
-        {/* Chat view */}
-        {activeMobileView === "chat" && (
+        {/* ── QUIZ MODE: show QuizPanel only ── */}
+        {isQuizMode && (
+          <QuizPanel documentId={documentId ?? ""} conversationId={conversationId} isGenerating={quizGenerating} />
+        )}
+
+        {/* ── CHAT MODE: show chat interface only ── */}
+        {!isQuizMode && (
           <>
             <div className="no-scrollbar flex-1 overflow-y-auto p-4 md:p-6">
               <div className="space-y-4">
@@ -293,22 +328,6 @@ export default function ChatPage() {
               </form>
             </div>
           </>
-        )}
-
-        {/* Quizzes view */}
-        {activeMobileView === "quizzes" && (
-          <div className="flex flex-1 flex-col min-h-0">
-            <div className="shrink-0 border-b border-border/50 px-4 py-3 md:hidden">
-              <p className="text-sm font-medium">Study Quizzes</p>
-            </div>
-            {documentId ? (
-              <QuizPanel documentId={documentId} />
-            ) : (
-              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                No document attached to this conversation.
-              </div>
-            )}
-          </div>
         )}
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const allCookies = request.cookies.getAll();
   
   if (request.nextUrl.searchParams.get('clearSession') === 'true') {
@@ -38,3 +38,5 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: ['/dashboard/:path*', '/chat/:path*', '/login', '/register'],
 };
+
+export default proxy;

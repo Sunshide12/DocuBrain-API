@@ -1,5 +1,7 @@
 "A datetime string with format `Y-m-d H:i:s`, e.g. `2018-05-23 13:43:32`."
 scalar DateTime @scalar(class: "Nuwave\\Lighthouse\\Schema\\Types\\Scalars\\DateTime")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Queries
 # ─────────────────────────────────────────────────────────────────────────────
@@ -87,6 +89,11 @@ type Mutation {
         @guard(with: ["sanctum"])
         @throttle(name: "api")
         @field(resolver: "App\\GraphQL\\Mutations\\DeleteConversation")
+
+    "Switch the agent type of an existing conversation."
+    switchAgentType(conversation_id: ID!, agent_type: String!): Conversation!
+        @guard(with: ["sanctum"])
+        @field(resolver: "App\\GraphQL\\Mutations\\SwitchAgentType")
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

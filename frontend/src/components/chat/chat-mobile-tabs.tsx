@@ -6,19 +6,23 @@ export type ChatMobileView = "chat" | "document" | "quizzes";
 
 interface ChatMobileTabsProps {
   active: ChatMobileView;
+  agentType: string;
   onChange: (view: ChatMobileView) => void;
 }
 
-const VIEWS: { value: ChatMobileView; label: string }[] = [
-  { value: "chat", label: "Chat" },
-  { value: "document", label: "Document" },
-  { value: "quizzes", label: "Quizzes" },
-];
+export function ChatMobileTabs({ active, agentType, onChange }: ChatMobileTabsProps) {
+  const isQuizMode = agentType === "quiz_generator";
 
-export function ChatMobileTabs({ active, onChange }: ChatMobileTabsProps) {
+  const views: { value: ChatMobileView; label: string }[] = [
+    { value: "document", label: "Document" },
+    ...(isQuizMode
+      ? [{ value: "quizzes" as ChatMobileView, label: "Quizzes" }]
+      : [{ value: "chat" as ChatMobileView, label: "Chat" }]),
+  ];
+
   return (
     <div className="flex items-center gap-1 rounded-full bg-muted p-1">
-      {VIEWS.map(({ value, label }) => (
+      {views.map(({ value, label }) => (
         <button
           key={value}
           type="button"

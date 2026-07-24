@@ -14,7 +14,7 @@ import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { UploadPanel } from "@/components/dashboard/upload-panel";
 import { UploadFab } from "@/components/dashboard/upload-fab";
 import { DocumentCard } from "@/components/dashboard/document-card";
-import { AgentPickerModal } from "@/components/agents/AgentPickerModal";
+
 
 const ME_QUERY = gql`
   query Me {
@@ -74,10 +74,6 @@ interface CreateConversationResponse {
   };
 }
 
-interface PendingDoc {
-  id: string;
-  title: string;
-}
 
 export default function UploadsPage() {
   const router = useRouter();
@@ -88,7 +84,6 @@ export default function UploadsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
-  const [pendingDoc, setPendingDoc] = useState<PendingDoc | null>(null);
   const notifiedDocsRef = useRef<Set<string>>(new Set());
 
   const { data: meData, error: meError } = useQuery({
@@ -234,23 +229,17 @@ export default function UploadsPage() {
         }
       `, { document_id: documentId, agent_type: agentType }),
     onSuccess: (data) => {
-      setPendingDoc(null);
       router.push(`/chat/${data.createConversation.id}`);
     },
     onError: () => toast.error("Failed to start conversation"),
   });
 
-  const handleChatClick = (docId: string, status: string, docTitle: string) => {
+  const handleChatClick = (docId: string, status: string) => {
     if (status !== 'ready') {
-      toast.error("Document is still processing or failed.");
+      toast.error("Document is still processing Twin.");
       return;
     }
-    setPendingDoc({ id: docId, title: docTitle });
-  };
-
-  const handleAgentConfirm = (agentType: string) => {
-    if (!pendingDoc) return;
-    createConversationMutation.mutate({ documentId: pendingDoc.id, agentType });
+    createConversationMutation.mutate({ documentId: docId, agentType: 'document_qa' });
   };
 
   if (!user) return <div className="flex h-dvh items-center justify-center">Loading session...</div>;
@@ -304,7 +293,7 @@ export default function UploadsPage() {
                 <DocumentCard
                   key={doc.id}
                   doc={doc}
-                  onSelect={(id, status) => handleChatClick(id, status, doc.title || doc.original_name)}
+                  onSelect={(id, status) => handleChatClick(id, status)}
                   isChatPending={createConversationMutation.isPending}
                 />
               ))}
@@ -320,15 +309,6 @@ export default function UploadsPage() {
         onFileChange={handleUpload}
       />
 
-      {pendingDoc && (
-        <AgentPickerModal
-          documentId={pendingDoc.id}
-          documentTitle={pendingDoc.title}
-          onConfirm={handleAgentConfirm}
-          onCancel={() => setPendingDoc(null)}
-          isConfirming={createConversationMutation.isPending}
-        />
-      )}
     </div>
   );
 }
