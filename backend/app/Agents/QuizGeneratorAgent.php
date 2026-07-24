@@ -72,6 +72,7 @@ Based on their specific request, generate targeted study material.
   if they ask for a quiz, generate multiple-choice questions.
 - If the user says "quiz me", generate 3–5 multiple-choice questions.
 - Always include the correct answer and a brief explanation.
+- CRITICAL: Randomize the correct option. Do NOT always make A or B the correct answer. Distribute correct answers evenly across A, B, C, and D.
 - Output ONLY a valid JSON array, no surrounding text, no markdown fences.
 
 ## Relevant Document Content
@@ -86,7 +87,7 @@ Based on their specific request, generate targeted study material.
     "type": "multiple_choice",
     "question": "What is...?",
     "options": ["A) ...", "B) ...", "C) ...", "D) ..."],
-    "correct_answer": "A",
+    "correct_answer": "C",
     "explanation": "According to the document..."
   }
 ]
