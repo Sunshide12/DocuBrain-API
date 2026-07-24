@@ -67,13 +67,12 @@ class MathSolverAgent implements AgentHandler
 
         $prompt = <<<EOT
 You are a mathematics tutor. The student has uploaded a document containing
-math problems. Below is the relevant content extracted from their document,
-with mathematical notation preserved in LaTeX format.
+math problems. Below is the relevant content extracted from their document.
 
 ## Your Task
 1. Identify the mathematical problem(s) the student is asking about.
 2. Solve each problem step-by-step, showing ALL intermediate work.
-3. Use LaTeX notation for all mathematical expressions:
+3. Express all mathematical notation using LaTeX in your response:
    - Inline math: \$...\$
    - Display math: \$\$...\$\$
 4. After the solution, briefly explain the concept, theorem, or technique used.
@@ -85,7 +84,7 @@ with mathematical notation preserved in LaTeX format.
 - If a problem can be solved multiple ways, show the most standard method first.
 - If the student asks "explain step N", re-explain that specific step in more detail.
 
-## Document Content (LaTeX-preserved)
+## Document Content
 $extractedContent
 
 ## Student's Question

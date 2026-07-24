@@ -14,6 +14,7 @@ import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { UploadPanel } from "@/components/dashboard/upload-panel";
 import { UploadFab } from "@/components/dashboard/upload-fab";
 import { DocumentCard } from "@/components/dashboard/document-card";
+import { AgentPickerModal } from "@/components/agents/AgentPickerModal";
 
 const ME_QUERY = gql`
   query Me {
@@ -69,7 +70,13 @@ interface DocumentProgressEvent {
 interface CreateConversationResponse {
   createConversation: {
     id: string;
+    agent_type: string;
   };
+}
+
+interface PendingDoc {
+  id: string;
+  title: string;
 }
 
 export default function UploadsPage() {
@@ -81,6 +88,7 @@ export default function UploadsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [pendingDoc, setPendingDoc] = useState<PendingDoc | null>(null);
   const notifiedDocsRef = useRef<Set<string>>(new Set());
 
   const { data: meData, error: meError } = useQuery({
@@ -216,25 +224,33 @@ export default function UploadsPage() {
   };
 
   const createConversationMutation = useMutation({
-    mutationFn: (documentId: string) => graphqlClient.request<CreateConversationResponse>(gql`
-      mutation CreateConversation($document_id: ID!) {
-        createConversation(document_id: $document_id) {
-          id
+    mutationFn: ({ documentId, agentType }: { documentId: string; agentType: string }) =>
+      graphqlClient.request<CreateConversationResponse>(gql`
+        mutation CreateConversation($document_id: ID!, $agent_type: String) {
+          createConversation(document_id: $document_id, agent_type: $agent_type) {
+            id
+            agent_type
+          }
         }
-      }
-    `, { document_id: documentId }),
+      `, { document_id: documentId, agent_type: agentType }),
     onSuccess: (data) => {
+      setPendingDoc(null);
       router.push(`/chat/${data.createConversation.id}`);
     },
     onError: () => toast.error("Failed to start conversation"),
   });
 
-  const handleChatClick = (docId: string, status: string) => {
+  const handleChatClick = (docId: string, status: string, docTitle: string) => {
     if (status !== 'ready') {
       toast.error("Document is still processing or failed.");
       return;
     }
-    createConversationMutation.mutate(docId);
+    setPendingDoc({ id: docId, title: docTitle });
+  };
+
+  const handleAgentConfirm = (agentType: string) => {
+    if (!pendingDoc) return;
+    createConversationMutation.mutate({ documentId: pendingDoc.id, agentType });
   };
 
   if (!user) return <div className="flex h-dvh items-center justify-center">Loading session...</div>;
@@ -288,7 +304,7 @@ export default function UploadsPage() {
                 <DocumentCard
                   key={doc.id}
                   doc={doc}
-                  onSelect={handleChatClick}
+                  onSelect={(id, status) => handleChatClick(id, status, doc.title || doc.original_name)}
                   isChatPending={createConversationMutation.isPending}
                 />
               ))}
@@ -303,6 +319,16 @@ export default function UploadsPage() {
         uploadProgress={uploadProgress}
         onFileChange={handleUpload}
       />
+
+      {pendingDoc && (
+        <AgentPickerModal
+          documentId={pendingDoc.id}
+          documentTitle={pendingDoc.title}
+          onConfirm={handleAgentConfirm}
+          onCancel={() => setPendingDoc(null)}
+          isConfirming={createConversationMutation.isPending}
+        />
+      )}
     </div>
   );
 }

@@ -42,6 +42,11 @@ type Query {
         @guard(with: ["sanctum"])
         @throttle(name: "api")
         @field(resolver: "App\\GraphQL\\Queries\\DocumentQuizzes")
+
+    "Suggests the most suitable agent for a given document based on content analysis."
+    suggestAgent(document_id: ID!): AgentSuggestion!
+        @guard(with: ["sanctum"])
+        @field(resolver: "App\\GraphQL\\Queries\\SuggestAgent")
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -241,6 +246,12 @@ type AgentInfo {
     key: String!
     name: String!
     description: String!
+}
+
+"Represents an agent recommendation for a document."
+type AgentSuggestion {
+    agent_type: String!
+    confidence: Float!
 }
 
 "A quiz auto-generated from a document."

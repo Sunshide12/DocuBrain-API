@@ -47,11 +47,4 @@ return [
         'timeout' => (int) env('PROCESS_DOCUMENT_TIMEOUT', 300),
     ],
 
-    'math_extraction' => [
-        'provider' => env('MATH_EXTRACTOR_PROVIDER', 'mathpix'),
-        'api_key'  => env('MATHPIX_APP_KEY'),
-        'app_id'   => env('MATHPIX_APP_ID'),
-        'api_url'  => env('MATHPIX_API_URL', 'https://api.mathpix.com/v3'),
-    ],
-
 ];

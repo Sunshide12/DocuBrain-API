@@ -16,12 +16,14 @@ import { AnimatePresence } from "framer-motion";
 import { ChatMobileTabs, type ChatMobileView } from "@/components/chat/chat-mobile-tabs";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { TypingIndicator } from "@/components/chat/typing-indicator";
+import { QuizPanel } from "@/components/quiz/QuizPanel";
 
 const CONVERSATION_QUERY = gql`
   query GetConversation($id: ID!) {
     conversation(id: $id) {
       id
       title
+      agent_type
       document {
         id
         title
@@ -31,6 +33,8 @@ const CONVERSATION_QUERY = gql`
         id
         role
         content
+        response_type
+        metadata
         created_at
       }
     }
@@ -43,9 +47,17 @@ const SEND_MESSAGE_MUTATION = gql`
       id
       role
       content
+      response_type
+      metadata
     }
   }
 `;
+
+const AGENT_LABELS: Record<string, { label: string; color: string }> = {
+  document_qa:    { label: "Document Q&A",  color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
+  math_solver:    { label: "Math Solver",   color: "bg-orange-500/10 text-orange-600 dark:text-orange-400" },
+  quiz_generator: { label: "Quiz Generator", color: "bg-green-500/10 text-green-600 dark:text-green-400" },
+};
 
 export default function ChatPage() {
   const params = useParams();
@@ -61,7 +73,7 @@ export default function ChatPage() {
     queryKey: ["conversation", conversationId],
     queryFn: () => graphqlClient.request(CONVERSATION_QUERY, { id: conversationId }),
     enabled: !!user && !!conversationId,
-    refetchInterval: 3000, // Poor man's subscription for messages until Echo is fully implemented for chat
+    refetchInterval: 3000,
   });
 
   const sendMessageMutation = useMutation({
@@ -73,7 +85,6 @@ export default function ChatPage() {
       await queryClient.cancelQueries({ queryKey: ["conversation", conversationId] });
       const previousData: any = queryClient.getQueryData(["conversation", conversationId]);
 
-      // Optimistic update
       queryClient.setQueryData(["conversation", conversationId], (old: any) => {
         if (!old) return old;
         return {
@@ -82,14 +93,21 @@ export default function ChatPage() {
             ...old.conversation,
             messages: [
               ...old.conversation.messages,
-              { id: Date.now().toString(), role: "user", content: newMsg, created_at: new Date().toISOString() },
+              {
+                id: Date.now().toString(),
+                role: "user",
+                content: newMsg,
+                response_type: null,
+                metadata: null,
+                created_at: new Date().toISOString(),
+              },
             ],
           },
         };
       });
       return { previousData };
     },
-    onError: (err, newMsg, context) => {
+    onError: (_err, _newMsg, context) => {
       queryClient.setQueryData(["conversation", conversationId], context?.previousData);
       toast.error("Failed to send message");
     },
@@ -105,6 +123,37 @@ export default function ChatPage() {
     setContent("");
   };
 
+  // Listen for QuizGenerationCompleted broadcast event
+  useEffect(() => {
+    if (!user) return;
+    let channel: any = null;
+
+    const subscribe = async () => {
+      try {
+        if (typeof window === "undefined") return;
+        const { echo } = await import("@/lib/echo");
+        if (!echo) return;
+
+        channel = echo.private(`App.Models.User.${user.id}`);
+        channel.listen(".QuizGenerationCompleted", (e: { document_id: string; status: string }) => {
+          if (e?.status === "ready") {
+            toast.success("Study quiz is ready! Check the Quizzes tab.", { duration: 5000 });
+            queryClient.invalidateQueries({ queryKey: ["documentQuizzes"] });
+          }
+        });
+      } catch (err) {
+        console.error("Echo subscription failed", err);
+      }
+    };
+
+    subscribe();
+    return () => {
+      if (channel) {
+        import("@/lib/echo").then(({ echo }) => echo?.leave(channel.name));
+      }
+    };
+  }, [user, queryClient]);
+
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -118,18 +167,18 @@ export default function ChatPage() {
   if (!conversation) return <div className="flex h-screen items-center justify-center">Conversation not found.</div>;
 
   const documentId = conversation.document?.id;
+  const agentInfo = AGENT_LABELS[conversation.agent_type] ?? null;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background md:flex-row">
-      {/* Mobile-only bar: back to previous page + chat/document switcher. Always visible so
-          whichever panel is hidden below can still be reached. */}
+      {/* Mobile bar: back + tab switcher */}
       <div className="flex items-center gap-3 border-b border-border/50 bg-background px-3 py-2.5 md:hidden">
         <Button
           variant="ghost"
           size="icon"
           className="shrink-0"
           onClick={() => router.back()}
-          aria-label="Back to previous page"
+          aria-label="Back"
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -138,7 +187,7 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Left panel: PDF Viewer (45% on desktop, full width on mobile when selected) */}
+      {/* Left panel: PDF Viewer (45% desktop, mobile "document" tab only) */}
       <div
         className={cn(
           "w-full min-h-0 flex-1 flex-col border-r border-border/50 bg-muted/10 md:flex md:w-[45%] md:flex-initial",
@@ -161,43 +210,106 @@ export default function ChatPage() {
             />
           ) : (
             <div className="flex h-full items-center justify-center text-muted-foreground">
-              No document attached (Global Chat).
+              No document attached.
             </div>
           )}
         </div>
       </div>
 
-      {/* Right panel: Chat (55% on desktop, full width on mobile when selected) */}
+      {/* Right panel: Chat or Quizzes (55% desktop) */}
       <div
         className={cn(
           "relative w-full min-h-0 flex-1 flex-col bg-background md:z-10 md:flex md:w-[55%] md:flex-initial md:shadow-2xl",
-          activeMobileView === "chat" ? "flex" : "hidden"
+          (activeMobileView === "chat" || activeMobileView === "quizzes") ? "flex" : "hidden"
         )}
       >
-        <div className="no-scrollbar flex-1 overflow-y-auto p-4 md:p-6">
-          <div className="space-y-4">
-            <AnimatePresence>
-              {conversation.messages.map((msg: any) => (
-                <MessageBubble key={msg.id} role={msg.role} content={msg.content} />
-              ))}
-            </AnimatePresence>
-            {sendMessageMutation.isPending && <TypingIndicator />}
-            <div ref={messagesEndRef} className="h-2" />
+        {/* Desktop header with agent badge + Chat/Quizzes toggle */}
+        <div className="hidden h-14 shrink-0 items-center justify-between border-b border-border/50 bg-background px-4 md:flex">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-semibold truncate">{conversation.title}</span>
+            {agentInfo && (
+              <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium", agentInfo.color)}>
+                {agentInfo.label}
+              </span>
+            )}
           </div>
+          {documentId && (
+            <div className="ml-4 flex shrink-0 items-center gap-1 rounded-full bg-muted p-1">
+              {(["chat", "quizzes"] as const).map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  onClick={() => setActiveMobileView(view)}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-xs font-medium capitalize transition-colors",
+                    activeMobileView === view
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {view === "chat" ? "Chat" : "Quizzes"}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="p-4 md:p-6 bg-background border-t border-border/40">
-          <form onSubmit={handleSend} className="flex gap-3 items-center max-w-4xl mx-auto">
-            <Input
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Ask a question about the document..."
-              className="flex-1 bg-card border-border/60 shadow-sm focus-visible:ring-primary/50 rounded-full px-5 py-6 text-base"
-            />
-            <Button type="submit" size="icon" className="rounded-full h-12 w-12 shadow-sm" disabled={!content.trim() || sendMessageMutation.isPending}>
-              <Send className="h-4 w-4" />
-            </Button>
-          </form>
-        </div>
+
+        {/* Chat view */}
+        {activeMobileView === "chat" && (
+          <>
+            <div className="no-scrollbar flex-1 overflow-y-auto p-4 md:p-6">
+              <div className="space-y-4">
+                <AnimatePresence>
+                  {conversation.messages.map((msg: any) => (
+                    <MessageBubble
+                      key={msg.id}
+                      role={msg.role}
+                      content={msg.content}
+                      responseType={msg.response_type}
+                      metadata={msg.metadata}
+                    />
+                  ))}
+                </AnimatePresence>
+                {sendMessageMutation.isPending && <TypingIndicator />}
+                <div ref={messagesEndRef} className="h-2" />
+              </div>
+            </div>
+            <div className="p-4 md:p-6 bg-background border-t border-border/40">
+              <form onSubmit={handleSend} className="flex gap-3 items-center max-w-4xl mx-auto">
+                <Input
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="Ask a question about the document…"
+                  className="flex-1 bg-card border-border/60 shadow-sm focus-visible:ring-primary/50 rounded-full px-5 py-6 text-base"
+                />
+                <Button
+                  type="submit"
+                  size="icon"
+                  className="rounded-full h-12 w-12 shadow-sm"
+                  disabled={!content.trim() || sendMessageMutation.isPending}
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </form>
+            </div>
+          </>
+        )}
+
+        {/* Quizzes view */}
+        {activeMobileView === "quizzes" && (
+          <div className="flex flex-1 flex-col min-h-0">
+            <div className="shrink-0 border-b border-border/50 px-4 py-3 md:hidden">
+              <p className="text-sm font-medium">Study Quizzes</p>
+            </div>
+            {documentId ? (
+              <QuizPanel documentId={documentId} />
+            ) : (
+              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                No document attached to this conversation.
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

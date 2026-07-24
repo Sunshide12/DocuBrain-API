@@ -27,7 +27,7 @@ class AppServiceProvider extends ServiceProvider
         );
         $this->app->bind(
             \App\Services\Contracts\MathExtractor::class,
-            \App\Services\MathpixMathExtractor::class
+            \App\Services\PdfTextMathExtractor::class
         );
     }
 
@@ -60,7 +60,11 @@ class AppServiceProvider extends ServiceProvider
 
         // Auto-generate a quiz when a document finishes processing.
         Event::listen(\App\Events\DocumentProcessed::class, function (\App\Events\DocumentProcessed $event) {
-            \App\Jobs\GenerateAutoQuizJob::dispatch($event->document);
+            try {
+                \App\Jobs\GenerateAutoQuizJob::dispatch($event->document);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to dispatch GenerateAutoQuizJob: ' . $e->getMessage());
+            }
         });
     }
 }

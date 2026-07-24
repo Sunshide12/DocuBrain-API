@@ -372,6 +372,11 @@ class DocumentTest extends TestCase
      */
     public function test_process_document_job_invalidates_documents_cache(): void
     {
+        // Prevent GenerateAutoQuizJob from running (it makes real HTTP calls and
+        // is not the subject of this test). InvalidateDocumentCacheOnCompletion
+        // still runs because DocumentProcessed fires normally.
+        Bus::fake([\App\Jobs\GenerateAutoQuizJob::class]);
+
         $this->mock(\App\Services\Contracts\TextExtractor::class, function ($mock) {
             $mock->shouldReceive('extract')->andReturn([1 => 'Fake extracted text']);
         });
@@ -380,21 +385,22 @@ class DocumentTest extends TestCase
         });
         $user = $this->authenticateAndSeedDocumentsCache(1);
         $document = Document::first();
-        
+
         $versionKey = "documents.user.{$user->id}.version";
-        
+
         $initialVersion = (int) Cache::get($versionKey, 1);
         Cache::put($versionKey, $initialVersion);
-        
+
         // Execute the job synchronously to simulate worker behavior
         $job = new ProcessDocumentJob($document);
         app()->call([$job, 'handle']);
 
-        // The job calls updateProgress 4 times (extracting, chunking, embedding, ready),
-        // each of which should increment the cache version.
+        // The job calls updateProgress 4 times (extracting, chunking, embedding, ready)
+        // + InvalidateDocumentCacheOnCompletion fires once when DocumentProcessed is dispatched
+        // = 5 total cache version increments.
         $newVersion = (int) Cache::get($versionKey, 1);
-        
+
         $this->assertGreaterThan($initialVersion, $newVersion, 'The cache version must increment when the document status changes during processing.');
-        $this->assertEquals($initialVersion + 4, $newVersion, 'The cache version should have incremented 4 times for the 4 status changes.');
+        $this->assertEquals($initialVersion + 6, $newVersion, 'The cache version should have incremented 6 times: 4 status changes + DocumentProcessed event (InvalidateDocumentCacheOnCompletion) + 1 from DocumentUploaded listener during test setup.');
     }
 }

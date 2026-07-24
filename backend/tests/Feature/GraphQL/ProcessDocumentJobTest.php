@@ -62,6 +62,7 @@ class ProcessDocumentJobTest extends TestCase
     public function test_job_processes_document_and_sets_status_ready(): void
     {
         Redis::spy();
+        Event::fake([\App\Events\DocumentProcessed::class]);
         \Illuminate\Support\Facades\Storage::fake('local');
         \Illuminate\Support\Facades\Storage::disk('local')->put('dummy.pdf', 'fake');
 

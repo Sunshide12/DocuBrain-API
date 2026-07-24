@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 
-export type ChatMobileView = "chat" | "document";
+export type ChatMobileView = "chat" | "document" | "quizzes";
 
 interface ChatMobileTabsProps {
   active: ChatMobileView;
@@ -12,6 +12,7 @@ interface ChatMobileTabsProps {
 const VIEWS: { value: ChatMobileView; label: string }[] = [
   { value: "chat", label: "Chat" },
   { value: "document", label: "Document" },
+  { value: "quizzes", label: "Quizzes" },
 ];
 
 export function ChatMobileTabs({ active, onChange }: ChatMobileTabsProps) {
