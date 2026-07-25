@@ -31,8 +31,28 @@ class DocumentQAAgent implements AgentHandler
         return 'Answer questions using the content of the selected document.';
     }
 
+    public function supportedIntents(): array
+    {
+        return ['ask_question', 'summarize'];
+    }
+
     public function handle(AgentContext $context): AgentResponse
     {
+        if ($context->intent?->isChat()) {
+            return new AgentResponse(
+                answer: 'Estoy aquí para ayudarte con el contenido de tu documento. ¿Qué te gustaría saber?',
+                responseType: 'text',
+            );
+        }
+
+        if ($context->intent?->isTopicMissing()) {
+            $topic = $context->intent->topic;
+            return new AgentResponse(
+                answer: "El documento no contiene información sobre \"{$topic}\". Puedo responder preguntas sobre los temas que están en el PDF.",
+                responseType: 'text',
+            );
+        }
+
         $threshold = (float) config('services.openrouter.similarity_threshold', 0.75);
 
         $questionVector = $this->embeddingProvider->embed($context->question);
@@ -75,14 +95,14 @@ Your primary objective is to answer the reader's questions accurately using ONLY
 - Do NOT speculate.
 - Do NOT fabricate citations or page numbers.
 - If multiple sections of the context contribute to the answer, combine them into a single coherent response.
-
+- 
 ## Response Style
 
 - Answer naturally and conversationally.
 - Be concise by default.
 - If the user requests more detail, provide a more comprehensive explanation using only the document.
 - Preserve terminology used by the document.
-- When appropriate, mention the page number(s) where the information was found.
+- Mention the page number(s) where the information was found.
 
 ## Context
 

@@ -12,9 +12,10 @@ class PgvectorSimilaritySearch
      * @param int $userId
      * @param int|null $documentId
      * @param float $threshold
+     * @param int $limit
      * @return Collection
      */
-    public function search(array $queryVector, int $userId, ?int $documentId, float $threshold): Collection
+    public function search(array $queryVector, int $userId, ?int $documentId, float $threshold, int $limit = 5): Collection
     {
         // Fuerza bruta sin índice vectorial: para < 10K chunks el escaneo secuencial es suficiente.
         // Un índice HNSW tiene sentido a partir de ~100K filas.
@@ -28,7 +29,7 @@ class PgvectorSimilaritySearch
         }
 
         return $query->similarTo($queryVector, $threshold)
-            ->limit(5)
+            ->limit($limit)
             ->get();
     }
 }

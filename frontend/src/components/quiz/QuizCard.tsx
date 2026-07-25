@@ -4,8 +4,10 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CheckCircle, XCircle, Eye } from "lucide-react";
+import { OpenEndedCard } from "./OpenEndedCard";
 
 interface QuizCardProps {
+  questionId?: string;
   question: string;
   type: string;
   options?: string[] | null;
@@ -15,6 +17,7 @@ interface QuizCardProps {
 }
 
 export function QuizCard({
+  questionId,
   question,
   type,
   options,
@@ -65,6 +68,17 @@ export function QuizCard({
           </div>
         )}
       </div>
+    );
+  }
+
+  if (type === "open_ended") {
+    return (
+      <OpenEndedCard
+        questionId={questionId}
+        question={question}
+        correctAnswer={correctAnswer}
+        onAnswer={onAnswer}
+      />
     );
   }
 

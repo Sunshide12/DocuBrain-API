@@ -4,9 +4,11 @@ namespace Tests\Feature\GraphQL;
 
 use App\Agents\AgentRegistry;
 use App\DTOs\AgentResponse;
+use App\DTOs\ClassifiedIntent;
 use App\Models\Conversation;
 use App\Models\User;
 use App\Services\Contracts\AgentHandler;
+use App\Services\IntentClassifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery\MockInterface;
 use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
@@ -23,8 +25,17 @@ class MessageTest extends TestCase
 
         $this->actingAs($user);
 
+        // SendMessage classifies intent before dispatching to the agent; stub it
+        // so the test doesn't depend on a real LLM call.
+        $this->mock(IntentClassifier::class, function (MockInterface $mock) {
+            $mock->shouldReceive('classify')->andReturn(
+                new ClassifiedIntent(intent: 'ask_question', topic: null, topicInDocument: true, confidence: 1.0)
+            );
+        });
+
         $this->mock(AgentRegistry::class, function (MockInterface $mock) {
             $fakeAgent = \Mockery::mock(AgentHandler::class);
+            $fakeAgent->shouldReceive('supportedIntents')->andReturn(['ask_question']);
             $fakeAgent->shouldReceive('handle')->andReturn(
                 new AgentResponse(answer: 'Respuesta simulada')
             );

@@ -12,7 +12,7 @@ final class DocumentQuizzes
         return Quiz::with('questions')
             ->where('document_id', $args['document_id'])
             ->where('user_id', Auth::id())
-            ->orderByDesc('created_at')
+            ->orderBy('created_at')
             ->get();
     }
 }

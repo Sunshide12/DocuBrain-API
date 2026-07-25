@@ -42,6 +42,22 @@ const SEND_MESSAGE_MUTATION = gql`
   }
 `;
 
+// The agent can insert extra assistant messages (e.g. an overflow warning)
+// directly into the conversation before its final reply, which sendMessage's
+// return value doesn't include. We re-fetch to pick those up.
+const CONVERSATION_MESSAGES_QUERY = gql`
+  query ConversationMessages($id: ID!) {
+    conversation(id: $id) {
+      messages {
+        id
+        role
+        content
+        response_type
+      }
+    }
+  }
+`;
+
 interface QuizQuestion {
   id: string;
   question: string;
@@ -64,19 +80,28 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  isSystem?: boolean;
+  isWarning?: boolean;
+}
+
+interface RawMessage {
+  id: string;
+  role: string;
+  content: string;
+  response_type: string | null;
 }
 
 interface QuizPanelProps {
   documentId: string;
   conversationId?: string;
-  isGenerating?: boolean;
 }
 
-export function QuizPanel({ documentId, conversationId, isGenerating }: QuizPanelProps) {
+export function QuizPanel({ documentId, conversationId }: QuizPanelProps) {
   const queryClient = useQueryClient();
   const [chatInput, setChatInput] = useState("");
   const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const shownMessageIds = useRef<Set<string>>(new Set());
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["documentQuizzes", documentId],
@@ -103,18 +128,72 @@ export function QuizPanel({ documentId, conversationId, isGenerating }: QuizPane
         { id: Date.now().toString(), role: "user", content },
       ]);
     },
-    onSuccess: (data: any) => {
+    onSuccess: async (data: any) => {
       const msg = data?.sendMessage;
-      if (msg) {
-        setLocalMessages((prev) => [
-          ...prev,
-          { id: msg.id, role: "assistant", content: msg.content },
-        ]);
-        // If a new quiz was generated, refresh
-        if (msg.response_type === "quiz") {
-          queryClient.invalidateQueries({ queryKey: ["documentQuizzes", documentId] });
+      if (!msg) return;
+
+      // Pick up any intermediate system messages (e.g. an overflow warning) the
+      // agent inserted directly into the conversation before its final reply.
+      if (conversationId) {
+        try {
+          const convo = await graphqlClient.request<{ conversation: { messages: RawMessage[] } }>(
+            CONVERSATION_MESSAGES_QUERY,
+            { id: conversationId }
+          );
+          const warnings = (convo.conversation?.messages ?? []).filter(
+            (m) =>
+              m.role === "assistant" &&
+              m.response_type === "text" &&
+              m.id !== msg.id &&
+              !shownMessageIds.current.has(m.id)
+          );
+          for (const w of warnings) {
+            shownMessageIds.current.add(w.id);
+            setLocalMessages((prev) => [
+              ...prev,
+              { id: w.id, role: "assistant" as const, content: w.content, isWarning: true },
+            ]);
+          }
+        } catch {
+          // Best-effort — a failed lookup shouldn't block showing the main reply.
         }
       }
+
+      shownMessageIds.current.add(msg.id);
+
+      if (msg.response_type === "quiz") {
+        const metadata = msg.metadata ? JSON.parse(msg.metadata) : null;
+        const count = metadata?.questions?.length;
+        
+        setLocalMessages((prev) => [
+          ...prev,
+          {
+            id: msg.id,
+            role: "assistant" as const,
+            content: count
+                ? `¡Listo! Generé ${count} preguntas para ti. Puedes verlas arriba en la lista 👆`
+                : "¡Quiz generado! Puedes verlo arriba en la lista 👆",
+          },
+        ]);
+        queryClient.refetchQueries({ queryKey: ["documentQuizzes", documentId] });
+      } else {
+        // Regular text, explanation, or friendly rejection response → show as normal chat bubble
+        setLocalMessages((prev) => [
+          ...prev,
+          { id: msg.id, role: "assistant" as const, content: msg.content },
+        ]);
+      }
+    },
+    onError: () => {
+      setLocalMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: "assistant" as const,
+          content: "❌ Something went wrong. Please try again.",
+          isSystem: true,
+        },
+      ]);
     },
   });
 
@@ -151,24 +230,39 @@ export function QuizPanel({ documentId, conversationId, isGenerating }: QuizPane
             </div>
           )}
 
-          {!isLoading && !error && quizzes.length === 0 && localMessages.length === 0 && !isGenerating && (
-            <div className="flex flex-col items-center justify-center gap-3 py-16 text-center px-6">
-              <BookOpen className="h-8 w-8 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground max-w-xs">
-                No quizzes yet. Ask me to generate one using the chat below!
-              </p>
-              <p className="text-xs text-muted-foreground/70">
-                Try: <em>"Give me a 5-question quiz about this document"</em>
-              </p>
-            </div>
-          )}
-
-          {isGenerating && (
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 flex flex-col items-center justify-center gap-3 text-center animate-pulse">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          {!isLoading && !error && quizzes.length === 0 && localMessages.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-4 py-14 text-center px-6">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <BookOpen className="h-7 w-7" />
+              </div>
               <div>
-                <p className="text-sm font-medium text-primary">Generating your study quiz...</p>
-                <p className="text-xs text-muted-foreground mt-1">This might take a few moments as I analyze the document.</p>
+                <p className="text-base font-semibold">Ready to study?</p>
+                <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+                  Tell me how many questions you want and I'll generate a quiz from this document.
+                </p>
+              </div>
+              {/* Quick suggestion chips */}
+              <div className="flex flex-wrap justify-center gap-2 mt-1">
+                {[
+                  "Give me 5 multiple-choice questions",
+                  "Make 3 flashcards",
+                  "10 questions about the key concepts",
+                ].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => {
+                      setChatInput(suggestion);
+                      // auto-submit
+                      if (conversationId) {
+                        sendMutation.mutate(suggestion);
+                      }
+                    }}
+                    className="rounded-full border border-border bg-muted/40 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
               </div>
             </div>
           )}
@@ -189,19 +283,31 @@ export function QuizPanel({ documentId, conversationId, isGenerating }: QuizPane
                 key={msg.id}
                 className={cn(
                   "flex",
-                  msg.role === "user" ? "justify-end" : "justify-start"
+                  msg.isSystem || msg.isWarning
+                    ? "justify-center"
+                    : msg.role === "user" ? "justify-end" : "justify-start"
                 )}
               >
-                <div
-                  className={cn(
-                    "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm",
-                    msg.role === "user"
-                      ? "bg-primary text-primary-foreground rounded-br-sm"
-                      : "bg-muted text-foreground rounded-bl-sm"
-                  )}
-                >
-                  {msg.content}
-                </div>
+                {msg.isWarning ? (
+                  <span className="rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 text-xs px-3 py-1.5 font-medium max-w-[90%] text-center">
+                    ⚠️ {msg.content}
+                  </span>
+                ) : msg.isSystem ? (
+                  <span className="rounded-full bg-primary/10 text-primary text-xs px-3 py-1 font-medium">
+                    {msg.content}
+                  </span>
+                ) : (
+                  <div
+                    className={cn(
+                      "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm",
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground rounded-br-sm"
+                        : "bg-muted text-foreground rounded-bl-sm"
+                    )}
+                  >
+                    {msg.content}
+                  </div>
+                )}
               </div>
             ))}
             {sendMutation.isPending && (
@@ -296,6 +402,7 @@ function QuizAccordion({ quiz }: { quiz: Quiz }) {
         {quiz.questions.map((q) => (
           <QuizCard
             key={q.id}
+            questionId={q.id}
             question={q.question}
             type={q.type}
             options={q.options}

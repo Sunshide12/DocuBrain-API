@@ -94,6 +94,12 @@ type Mutation {
     switchAgentType(conversation_id: ID!, agent_type: String!): Conversation!
         @guard(with: ["sanctum"])
         @field(resolver: "App\\GraphQL\\Mutations\\SwitchAgentType")
+
+    "Evaluates a user's free-text answer to an open-ended quiz question via the LLM. Stateless — does not persist the answer."
+    reviewOpenEndedAnswer(question_id: ID!, user_answer: String!): OpenEndedReview!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Mutations\\ReviewOpenEndedAnswer")
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -282,6 +288,16 @@ type QuizQuestion {
     explanation: String
     page_number: Int
     sort_order: Int!
+}
+
+"Result of an LLM review of a user's answer to an open-ended quiz question."
+type OpenEndedReview {
+    "excellent | good | partial | incorrect"
+    score: String!
+    "Explanation of what was right or missing in the user's answer."
+    feedback: String!
+    "True when score is 'excellent' or 'good'."
+    isCorrect: Boolean!
 }
 
 "Payload for document progress updates."

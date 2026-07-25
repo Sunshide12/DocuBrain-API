@@ -62,7 +62,6 @@ export default function ChatPage() {
   const queryClient = useQueryClient();
   const [content, setContent] = useState("");
   const [activeMobileView, setActiveMobileView] = useState<ChatMobileView>("chat");
-  const [quizGenerating, setQuizGenerating] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const quizToastShownRef = useRef<Set<string>>(new Set());
 
@@ -133,11 +132,8 @@ export default function ChatPage() {
     // Auto-switch view based on new agent
     if (newAgentType === "quiz_generator") {
       setActiveMobileView("quizzes");
-      // Will show generating state in QuizPanel until quiz is ready
-      setQuizGenerating(true);
     } else {
       setActiveMobileView("chat");
-      setQuizGenerating(false);
     }
   };
 
@@ -158,11 +154,7 @@ export default function ChatPage() {
           if (e?.status === "ready" && !quizToastShownRef.current.has(key)) {
             quizToastShownRef.current.add(key);
             toast.success("¡El quiz está listo!", { duration: 4000 });
-            setQuizGenerating(false);
             queryClient.invalidateQueries({ queryKey: ["documentQuizzes"] });
-          }
-          if (e?.status === "failed") {
-            setQuizGenerating(false);
           }
         });
       } catch (err) {
@@ -286,7 +278,7 @@ export default function ChatPage() {
 
         {/* ── QUIZ MODE: show QuizPanel only ── */}
         {isQuizMode && (
-          <QuizPanel documentId={documentId ?? ""} conversationId={conversationId} isGenerating={quizGenerating} />
+          <QuizPanel documentId={documentId ?? ""} conversationId={conversationId} />
         )}
 
         {/* ── CHAT MODE: show chat interface only ── */}

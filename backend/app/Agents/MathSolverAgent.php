@@ -26,8 +26,27 @@ class MathSolverAgent implements AgentHandler
         return 'Solves math problems from your documents step-by-step, including formulas and equations.';
     }
 
+    public function supportedIntents(): array
+    {
+        return ['solve_problem', 'explain_step'];
+    }
+
     public function handle(AgentContext $context): AgentResponse
     {
+        if ($context->intent?->isChat()) {
+            return new AgentResponse(
+                answer: 'Soy el asistente de matemáticas. Puedo resolver problemas y explicar paso a paso los ejercicios de tu documento. ¿Qué necesitas?',
+                responseType: 'text',
+            );
+        }
+
+        if ($context->intent?->isTopicMissing()) {
+            return new AgentResponse(
+                answer: "No encontré problemas matemáticos relacionados con \"{$context->intent->topic}\" en este documento.",
+                responseType: 'text',
+            );
+        }
+
         if (!$context->document) {
             return new AgentResponse(
                 answer: 'The Math Solver requires a specific document. Please start a conversation with a document selected.',

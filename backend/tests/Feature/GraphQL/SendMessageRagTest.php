@@ -4,12 +4,14 @@ namespace Tests\Feature\GraphQL;
 
 use App\Agents\AgentRegistry;
 use App\DTOs\AgentResponse;
+use App\DTOs\ClassifiedIntent;
 use App\Models\Conversation;
 use App\Models\Document;
 use App\Models\DocumentChunk;
 use App\Models\User;
 use App\Services\Contracts\AgentHandler;
 use App\Services\Contracts\EmbeddingProvider;
+use App\Services\IntentClassifier;
 use App\Services\PgvectorSimilaritySearch;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery\MockInterface;
@@ -51,8 +53,17 @@ class SendMessageRagTest extends TestCase
             'page_number' => 2,
         ]);
 
+        // SendMessage classifies intent before dispatching to the agent; stub it
+        // so the test doesn't depend on a real LLM call.
+        $this->mock(IntentClassifier::class, function (MockInterface $mock) {
+            $mock->shouldReceive('classify')->andReturn(
+                new ClassifiedIntent(intent: 'ask_question', topic: null, topicInDocument: true, confidence: 1.0)
+            );
+        });
+
         $this->mock(AgentRegistry::class, function (MockInterface $mock) use ($chunk1, $chunk2) {
             $fakeAgent = \Mockery::mock(AgentHandler::class);
+            $fakeAgent->shouldReceive('supportedIntents')->andReturn(['ask_question', 'summarize']);
             $fakeAgent->shouldReceive('handle')->andReturn(new AgentResponse(
                 answer: 'Esta es la respuesta simulada.',
                 sourceChunks: [
@@ -111,6 +122,12 @@ class SendMessageRagTest extends TestCase
             );
         });
 
+        $this->mock(IntentClassifier::class, function (MockInterface $mock) {
+            $mock->shouldReceive('classify')->andReturn(
+                new ClassifiedIntent(intent: 'ask_question', topic: null, topicInDocument: true, confidence: 1.0)
+            );
+        });
+
         $this->installFreshDocQAAgent();
 
         $response = $this->actingAs($user)->postGraphQL([
@@ -159,6 +176,12 @@ class SendMessageRagTest extends TestCase
 
         $this->mock(EmbeddingProvider::class, function (MockInterface $mock) {
             $mock->shouldReceive('embed')->andReturn(array_fill(0, 1536, 0.1));
+        });
+
+        $this->mock(IntentClassifier::class, function (MockInterface $mock) {
+            $mock->shouldReceive('classify')->andReturn(
+                new ClassifiedIntent(intent: 'ask_question', topic: null, topicInDocument: true, confidence: 1.0)
+            );
         });
 
         // Real PgvectorSimilaritySearch: scopes to user2's documents, finds 0 chunks.

@@ -148,9 +148,13 @@ export default function UploadsPage() {
                   notifiedDocsRef.current.add(notificationKey);
 
                   if (e.status === 'ready') {
-                    toast.success("A document has finished processing and is ready!");
+                    toast.success("A document has finished processing and is ready!", {
+                      closeButton: true,
+                    });
                   } else if (e.status === 'failed') {
-                    toast.error("A document failed to process.");
+                    toast.error("A document failed to process.", {
+                      closeButton: true,
+                    });
                   }
                 }
               }

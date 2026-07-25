@@ -4,7 +4,6 @@ namespace App\GraphQL\Mutations;
 
 use App\Agents\AgentRegistry;
 use App\Models\Conversation;
-use App\Models\Quiz;
 use Illuminate\Support\Facades\Auth;
 
 class SwitchAgentType
@@ -30,20 +29,6 @@ class SwitchAgentType
 
         $conversation->agent_type = $agentType;
         $conversation->save();
-
-        // When switching to quiz_generator, auto-generate a quiz if none exists yet
-        if ($agentType === 'quiz_generator' && $conversation->document_id) {
-            $alreadyHasQuiz = Quiz::where('document_id', $conversation->document_id)
-                ->whereIn('status', ['ready', 'generating'])
-                ->exists();
-
-            if (!$alreadyHasQuiz) {
-                $document = $conversation->document;
-                if ($document) {
-                    \App\Jobs\GenerateAutoQuizJob::dispatch($document);
-                }
-            }
-        }
 
         return $conversation;
     }
