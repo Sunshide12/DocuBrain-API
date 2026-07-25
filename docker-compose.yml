@@ -11,17 +11,15 @@ services:
     container_name: docubrain-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: docubrain
-      POSTGRES_USER: docubrain
-      POSTGRES_PASSWORD: docubrain
+      POSTGRES_DB: ${DB_DATABASE:-docubrain}
+      POSTGRES_USER: ${DB_USERNAME:-docubrain}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       PGDATA: /var/lib/postgresql/data/pgdata
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U docubrain -d docubrain"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-docubrain} -d ${DB_DATABASE:-docubrain}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -33,8 +31,6 @@ services:
     image: redis:7-alpine
     container_name: docubrain-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -53,31 +49,29 @@ services:
     container_name: docubrain-app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     working_dir: /var/www/html
     volumes:
       - .:/var/www/html
+    env_file: .env
     environment:
-      APP_ENV: local
-      APP_DEBUG: "true"
-      DB_CONNECTION: pgsql
+      # Hostnames internos de Docker (sobreescriben el .env)
       DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: docubrain
-      DB_USERNAME: docubrain
-      DB_PASSWORD: docubrain
-      CACHE_STORE: redis
-      QUEUE_CONNECTION: redis
-      SESSION_DRIVER: redis
       REDIS_HOST: redis
-      REDIS_PORT: 6379
+      REVERB_HOST: reverb
+      # Activa composer install + migrate en el entrypoint
+      RUN_SETUP: "true"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-
-
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/up"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
 
   # ─────────────────────────────────────────────────────────────────────────
   # Laravel Reverb (WebSockets)
@@ -88,29 +82,46 @@ services:
       dockerfile: Dockerfile
     container_name: docubrain-reverb
     restart: unless-stopped
-    working_dir: /var/www/html
-    command: php artisan reverb:start --host="0.0.0.0" --port=8080 --debug
     ports:
-      - "8080:8080"
+      - "${REVERB_SERVER_PORT:-8080}:8080"
+    working_dir: /var/www/html
     volumes:
       - .:/var/www/html
+    env_file: .env
     environment:
-      APP_ENV: local
-      APP_DEBUG: "true"
-      DB_CONNECTION: pgsql
       DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: docubrain
-      DB_USERNAME: docubrain
-      DB_PASSWORD: docubrain
-      CACHE_STORE: redis
-      QUEUE_CONNECTION: redis
-      SESSION_DRIVER: redis
       REDIS_HOST: redis
-      REDIS_PORT: 6379
       REVERB_SERVER_HOST: 0.0.0.0
       REVERB_SERVER_PORT: 8080
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
     depends_on:
+      app:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Laravel Queue Worker
+  # ─────────────────────────────────────────────────────────────────────────
+  queue:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docubrain-queue
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+    env_file: .env
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
+    command: ["php", "artisan", "queue:work", "--tries=3", "--sleep=3", "--timeout=300", "--max-time=3600"]
+    depends_on:
+      app:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
