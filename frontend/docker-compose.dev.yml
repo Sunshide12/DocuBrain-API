@@ -1,0 +1,17 @@
+# Override de desarrollo (hot reload):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Usa la etapa `dev` (next dev) y monta el código. node_modules y .next quedan en
+# volúmenes anónimos para que el host no pise lo instalado dentro de la imagen.
+services:
+  frontend:
+    build:
+      target: dev
+    image: docubrain-frontend:dev
+    environment:
+      NODE_ENV: development
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next

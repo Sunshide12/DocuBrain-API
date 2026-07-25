@@ -1,0 +1,36 @@
+# Stack del frontend — independiente del docker-compose del backend.
+#
+#   cd frontend
+#   docker compose up -d --build          # producción (standalone)
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d   # hot reload
+#
+# No comparte red con el backend: el navegador es quien llama a la API, así que
+# las URLs de abajo deben ser alcanzables desde el host, no desde el contenedor.
+name: docubrain-frontend
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        # Se inyectan en el bundle del cliente en tiempo de build (NEXT_PUBLIC_*),
+        # no en tiempo de arranque. Sobreescribibles con variables de entorno o .env
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_GRAPHQL_URL: ${NEXT_PUBLIC_GRAPHQL_URL:-http://localhost:8000/graphql}
+        NEXT_PUBLIC_REVERB_APP_KEY: ${NEXT_PUBLIC_REVERB_APP_KEY:-docubrain-key}
+        NEXT_PUBLIC_REVERB_HOST: ${NEXT_PUBLIC_REVERB_HOST:-localhost}
+        NEXT_PUBLIC_REVERB_PORT: ${NEXT_PUBLIC_REVERB_PORT:-8080}
+        NEXT_PUBLIC_REVERB_WSS_PORT: ${NEXT_PUBLIC_REVERB_WSS_PORT:-8080}
+        NEXT_PUBLIC_REVERB_SCHEME: ${NEXT_PUBLIC_REVERB_SCHEME:-http}
+    image: docubrain-frontend:latest
+    container_name: docubrain-frontend
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
