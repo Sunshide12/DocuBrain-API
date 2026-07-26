@@ -41,6 +41,17 @@ WORKDIR /var/www/html
 # Copiar todo el código de la aplicación (Crítico para Coolify/Producción)
 COPY . /var/www/html
 
+# .dockerignore excluye bootstrap/cache y storage/* enteros (incluye sus placeholders .gitignore),
+# así que hay que recrearlos aquí: Laravel requiere que existan y sean escribibles en runtime.
+RUN mkdir -p bootstrap/cache \
+    storage/framework/cache/data \
+    storage/framework/sessions \
+    storage/framework/views \
+    storage/framework/testing \
+    storage/logs \
+    storage/app \
+    && chmod -R 775 bootstrap/cache storage
+
 EXPOSE 8000
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
