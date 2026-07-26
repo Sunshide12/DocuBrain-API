@@ -97,7 +97,70 @@ docubrain/
     └── decisions/             # ADRs opcionales, uno por decisión no trivial
 ```
 
-## 6. Roadmap por fases — entregable real sobre DocuBrain en cada una
+## 6. Sistema de Agentes (Arquitectura y Flujo)
+
+### 6.1 Arquitectura General
+
+Cada mensaje del usuario pasa por este flujo **sin excepciones**:
+
+```
+SendMessage mutation
+    └── IntentClassifier::classify()      ← clasifica intención + tópico
+        └── Agent::handle(context)         ← agente ejecuta con ClassifiedIntent disponible
+            └── AgentResponse              ← respuesta tipada
+```
+
+### 6.2 Cómo Funciona el `IntentClassifier`
+
+`App\Services\IntentClassifier` es el clasificador centralizado. Hace lo siguiente:
+
+1. **Llama al LLM** con un prompt corto para clasificar la intención del usuario y extraer el tópico mencionado.
+2. **Verifica el tópico** contra el documento via pgvector (similarity search) si se detectó un tópico específico.
+3. Retorna un `ClassifiedIntent` DTO con: `intent`, `topic`, `topicInDocument`, `confidence`.
+
+### 6.3 Cómo Crear un Nuevo Agente
+
+Implementa la interface `App\Services\Contracts\AgentHandler`. Requiere **cuatro métodos**:
+
+```php
+class MyNewAgent implements AgentHandler
+{
+    public function key(): string { return 'my_agent'; }
+    public function name(): string { return 'My Agent Name'; }
+    public function description(): string { return 'Qué hace este agente en una frase.'; }
+
+    public function supportedIntents(): array
+    {
+        return ['my_primary_intent', 'my_secondary_intent'];
+    }
+
+    public function handle(AgentContext $context): AgentResponse
+    {
+        // 1. Usuario está conversando
+        if ($context->intent?->isChat()) {
+            return new AgentResponse(answer: 'Respuesta conversacional', responseType: 'text');
+        }
+
+        // 2. Tópico NO está en el documento
+        if ($context->intent?->isTopicMissing()) {
+            return new AgentResponse(answer: "No encontré información sobre este tema.", responseType: 'text');
+        }
+
+        // 3. Lógica real
+    }
+}
+```
+
+En `App\Providers\AgentServiceProvider::boot()`:
+`$registry->register($this->app->make(MyNewAgent::class));`
+
+### 6.4 DTOs
+
+- **AgentContext**: Recibe `$question`, `$conversation`, `$document`, `$userId`, `$intent`.
+- **ClassifiedIntent**: `$intent`, `$topic`, `$topicInDocument`, `$confidence`, `isChat()`, `isTopicMissing()`.
+- **AgentResponse**: `$answer`, `$sourceChunks`, `$responseType` ('text', 'quiz', 'steps'), `$metadata`.
+
+## 7. Roadmap por fases — entregable real sobre DocuBrain en cada una
 
 Sin semanas fijas. Cada fase termina cuando el entregable funciona y está testeado, no cuando se acaba un plazo.
 
@@ -131,7 +194,7 @@ La única fase que introduce lógica de negocio genuinamente nueva — el resto 
 **Fase 9 — Integración y despliegue** *(nueva, fuera de las 8 originales)*
 Pulido de UX, manejo de errores, y despliegue real si se decidió hacerlo. No se solapa con aprender tecnología nueva — es la única fase pensada para consolidar, no para aprender.
 
-## 7. Decisiones abiertas
+## 8. Decisiones abiertas
 
 - ¿Single-user simplificado o algo de multi-tenancy desde ya?
 - ¿Despliegue en dominio real (VPS, DNS, Certbot) o todo se queda en Docker local?
