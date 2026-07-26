@@ -1,0 +1,309 @@
+"A datetime string with format `Y-m-d H:i:s`, e.g. `2018-05-23 13:43:32`."
+scalar DateTime @scalar(class: "Nuwave\\Lighthouse\\Schema\\Types\\Scalars\\DateTime")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Queries
+# ─────────────────────────────────────────────────────────────────────────────
+"Indicates what fields are available at the top level of a query operation."
+type Query {
+    "Returns the currently authenticated user."
+    me: User @auth @guard(with: ["sanctum"])
+
+    "Returns the documents for the authenticated user. Results are cached in Redis for 5 minutes per user."
+    documents(first: Int = 10, page: Int): DocumentPaginator!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Queries\\Documents")
+
+    "Returns a paginated list of chunks for a specific document."
+    chunks(document_id: ID!, first: Int = 20, page: Int): DocumentChunkPaginator!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Queries\\Chunks")
+
+    "Returns a paginated list of conversations for the authenticated user."
+    conversations: [Conversation!]! @paginate(defaultCount: 10) @guard(with: ["sanctum"])
+
+    "Returns a specific conversation by ID."
+    conversation(id: ID! @eq): Conversation @find @guard(with: ["sanctum"])
+
+    "Returns aggregated statistics for the authenticated user."
+    userStats: UserStats!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Queries\\UserStats")
+
+    "Returns the list of tools the orchestrator can route conversation turns to."
+    availableAgents: [AgentInfo!]!
+        @guard(with: ["sanctum"])
+        @field(resolver: "App\\GraphQL\\Queries\\AvailableAgents")
+
+    "Returns all quizzes for a given document, scoped to the authenticated user."
+    documentQuizzes(document_id: ID!): [Quiz!]!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Queries\\DocumentQuizzes")
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mutations
+# ─────────────────────────────────────────────────────────────────────────────
+type Mutation {
+    "Register a new user and return an auth token."
+    register(input: RegisterInput! @spread): AuthPayload!
+        @throttle(name: "guest")
+        @field(resolver: "App\\GraphQL\\Mutations\\Register")
+
+    "Authenticate an existing user and return an auth token."
+    login(input: LoginInput! @spread): AuthPayload!
+        @throttle(name: "guest")
+        @field(resolver: "App\\GraphQL\\Mutations\\Login")
+
+    "Revoke the current access token."
+    logout: LogoutResponse!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Mutations\\Logout")
+
+
+    "Create a new conversation. If document_id is null, it's a library-wide search."
+    createConversation(document_id: ID, title: String): Conversation!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Mutations\\CreateConversation")
+
+    "Send a message to a conversation. The orchestrator routes it to the right tool and requires a document to be attached."
+    sendMessage(conversation_id: ID!, content: String!): Message!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Mutations\\SendMessage")
+
+    "Delete a conversation."
+    deleteConversation(id: ID!): Boolean!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Mutations\\DeleteConversation")
+
+    "Evaluates a user's free-text answer to an open-ended quiz question via the LLM. Stateless — does not persist the answer."
+    reviewOpenEndedAnswer(question_id: ID!, user_answer: String!): OpenEndedReview!
+        @guard(with: ["sanctum"])
+        @throttle(name: "api")
+        @field(resolver: "App\\GraphQL\\Mutations\\ReviewOpenEndedAnswer")
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Subscriptions
+# ─────────────────────────────────────────────────────────────────────────────
+type Subscription {
+    "Subscribe to document processing progress updates."
+    documentProgress(document_id: ID): DocumentProgress
+        @subscription(class: "App\\GraphQL\\Subscriptions\\DocumentProgress")
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────────────────────────
+"Account of a person who uses this application."
+type User {
+    "Unique primary key."
+    id: ID!
+
+    "The user's display name."
+    name: String!
+
+    "Unique email address."
+    email: String!
+
+    "When the account was created."
+    created_at: DateTime!
+
+    "When the account was last updated."
+    updated_at: DateTime!
+}
+
+"Returned after a successful register or login."
+type AuthPayload {
+    "Sanctum personal access token."
+    token: String!
+
+    "The authenticated user."
+    user: User!
+}
+
+"Returned after a successful logout."
+type LogoutResponse {
+    "Confirmation message."
+    message: String!
+}
+
+"Aggregated statistics for the current user."
+type UserStats {
+    "Total number of documents uploaded by the user."
+    totalDocuments: Int!
+
+    "Number of documents with status 'ready'."
+    documentsReady: Int!
+
+    "Total number of conversations started by the user."
+    totalConversations: Int!
+}
+
+"An uploaded document."
+type Document {
+    id: ID!
+    user: User! @belongsTo
+    title: String
+    original_name: String!
+    file_path: String!
+    mime_type: String!
+    size: Int!
+    status: String!
+    error_message: String
+    created_at: DateTime!
+    updated_at: DateTime!
+
+    """
+    Fragmentos de texto extraídos del PDF.
+    Usa @hasMany para que Lighthouse los cargue en batch (un solo JOIN)
+    en lugar de una query por documento (problema N+1).
+    """
+    chunks: [DocumentChunk!]! @hasMany
+}
+
+"Paginated list of documents (custom type used with Cache::remember)."
+type DocumentPaginator {
+    "List of documents in this page."
+    data: [Document!]!
+    "Metadata about pagination."
+    paginatorInfo: PaginatorInfo!
+}
+
+"Standard paginator metadata."
+type PaginatorInfo {
+    "Total number of items."
+    total: Int!
+    "Number of items per page."
+    perPage: Int!
+    "Current page number."
+    currentPage: Int!
+    "Last available page."
+    lastPage: Int!
+    "Whether there is a next page."
+    hasMorePages: Boolean!
+}
+
+"Un fragmento de texto extraído de un documento PDF."
+type DocumentChunk {
+    id: ID!
+    document: Document! @belongsTo
+    chunk_index: Int!
+    content: String!
+    token_count: Int!
+    page_number: Int
+    created_at: DateTime!
+}
+
+"Paginated list of document chunks."
+type DocumentChunkPaginator {
+    "Lista de chunks en esta página."
+    data: [DocumentChunk!]!
+    "Metadata de paginación."
+    paginatorInfo: PaginatorInfo!
+}
+
+"A conversation representing a chat with a document or the whole library."
+type Conversation {
+    id: ID!
+    document: Document @belongsTo
+    agent_type: String!
+    title: String!
+    total_tokens: Int!
+    messages: [Message!]! @hasMany
+    created_at: DateTime!
+    updated_at: DateTime!
+}
+
+"A single message in a conversation."
+type SourceChunk {
+    id: Int!
+    page_number: Int
+}
+
+type Message {
+    id: ID!
+    conversation: Conversation! @belongsTo
+    role: String!
+    content: String!
+    source_chunks: [SourceChunk!] @rename(attribute: "source_chunk_ids")
+    response_type: String
+    metadata: String
+    agent_key: String
+    prompt_tokens: Int
+    completion_tokens: Int
+    created_at: DateTime!
+    updated_at: DateTime!
+}
+
+"Describes a tool the orchestrator can route conversation turns to."
+type AgentInfo {
+    key: String!
+    name: String!
+    description: String!
+}
+
+"A quiz auto-generated from a document."
+type Quiz {
+    id: ID!
+    document: Document! @belongsTo
+    title: String!
+    status: String!
+    error_message: String
+    questions: [QuizQuestion!]! @hasMany(defaultCount: 100)
+    created_at: DateTime!
+}
+
+"A single question within a quiz."
+type QuizQuestion {
+    id: ID!
+    question: String!
+    type: String!
+    options: [String!]
+    correct_answer: String!
+    explanation: String
+    page_number: Int
+    sort_order: Int!
+}
+
+"Result of an LLM review of a user's answer to an open-ended quiz question."
+type OpenEndedReview {
+    "excellent | good | partial | incorrect"
+    score: String!
+    "Explanation of what was right or missing in the user's answer."
+    feedback: String!
+    "True when score is 'excellent' or 'good'."
+    isCorrect: Boolean!
+}
+
+"Payload for document progress updates."
+type DocumentProgress {
+    document_id: ID!
+    status: String!
+    progress: Int
+    message: String
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inputs
+# ─────────────────────────────────────────────────────────────────────────────
+input RegisterInput {
+    name: String!
+    email: String! @rules(apply: ["email", "unique:users,email"])
+    password: String! @rules(apply: ["min:8", "confirmed"])
+    password_confirmation: String!
+}
+
+input LoginInput {
+    email: String! @rules(apply: ["email"])
+    password: String!
+}

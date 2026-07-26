@@ -1,0 +1,409 @@
+<?php
+
+namespace Tests\Feature\GraphQL;
+
+use App\Jobs\GenerateAutoQuizJob;
+use App\Jobs\ProcessDocumentJob;
+use App\Models\Document;
+use App\Models\User;
+use App\Services\Contracts\EmbeddingProvider;
+use App\Services\Contracts\TextExtractor;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
+use Nuwave\Lighthouse\Testing\MakesGraphQLRequests;
+use Tests\TestCase;
+
+class DocumentTest extends TestCase
+{
+    use MakesGraphQLRequests;
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::flush();
+    }
+
+    private function authenticateAndSeedDocumentsCache(int $documentCount): User
+    {
+        $user = User::factory()->create();
+        Document::factory($documentCount)->create(['user_id' => $user->id]);
+
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        $query = '
+            query {
+                documents {
+                    data { id }
+                    paginatorInfo { total }
+                }
+            }
+        ';
+
+        // First request — should populate cache.
+        $this->graphQL($query)->assertJsonPath('data.documents.paginatorInfo.total', $documentCount);
+
+        // Verify the versioned cache key was actually populated (version defaults to 1).
+        $cacheKey = "documents.user.{$user->id}.v1.page.1.per.10";
+        $this->assertTrue(Cache::has($cacheKey), "Expected versioned cache key '{$cacheKey}' to exist after first query.");
+
+        return $user;
+    }
+
+    /**
+     * Test 1: A document can be uploaded via the GraphQL mutation.
+     *
+     * NEW IN FASE 4: We add Bus::fake() to assert that ProcessDocumentJob
+     * is dispatched after upload. The mutation should return status 'pending'
+     * immediately — the heavy processing happens in the background.
+     *
+     * WHY Bus::fake() and NOT Queue::fake()?
+     * In Laravel 13, Queue::fake() hooks into the queue DRIVER layer.
+     * Bus::fake() hooks into the command BUS layer — which is what
+     * `ProcessDocumentJob::dispatch()` uses (the Dispatchable trait).
+     * Bus::fake() has assertDispatched(); Queue::fake() does not.
+     */
+    public function test_user_can_upload_document(): void
+    {
+        Storage::fake('local');
+        Bus::fake(); // <── Intercepts dispatch() calls without running the job.
+
+        $user = User::factory()->create();
+
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders([
+            'Authorization' => "Bearer $token",
+        ]);
+
+        $file = UploadedFile::fake()->createWithContent('document.pdf', '%PDF-1.4 Fake PDF Content');
+
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+            'title' => 'My Test Document',
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonStructure([
+            'message',
+            'document' => [
+                'id',
+                'title',
+                'original_name',
+                'mime_type',
+                'size',
+                'status',
+                'file_path',
+            ],
+        ]);
+
+        // The document should be saved with status 'pending' immediately.
+        $document = Document::first();
+        $this->assertNotNull($document);
+        $this->assertEquals('My Test Document', $document->title);
+        $this->assertEquals('document.pdf', $document->original_name);
+        $this->assertEquals('pending', $document->status);
+        Storage::assertExists($document->file_path);
+
+        // NEW (Fase 4): The job must have been dispatched to the queue.
+        Bus::assertDispatched(ProcessDocumentJob::class, function (ProcessDocumentJob $job) use ($document): bool {
+            return $job->document->id === $document->id;
+        });
+    }
+
+    /**
+     * Test 2: A user can query their documents (pagination).
+     *
+     * UPDATED IN FASE 4: The documents query now returns DocumentPaginator
+     * (our custom type) instead of the built-in @paginate connection.
+     */
+    public function test_user_can_query_documents(): void
+    {
+        Bus::fake();
+
+        $user1 = User::factory()->create();
+        $user2 = User::factory()->create();
+
+        Document::factory(3)->create(['user_id' => $user1->id]);
+        Document::factory(2)->create(['user_id' => $user2->id]);
+
+        $token = $user1->createToken('test-token')->plainTextToken;
+        $this->withHeaders([
+            'Authorization' => "Bearer $token",
+        ]);
+
+        $response = $this->graphQL(
+            /** @lang GraphQL */
+            '
+            query {
+                documents {
+                    data {
+                        id
+                        title
+                    }
+                    paginatorInfo {
+                        total
+                    }
+                }
+            }
+        '
+        );
+
+        $response->assertJsonPath('data.documents.paginatorInfo.total', 3);
+    }
+
+    /**
+     * Test 3: The documents query result is cached.
+     *
+     * After the first request, the result is stored in cache.
+     * A second identical request with a new document added should
+     * still serve the OLD cached total (stale reads confirm caching).
+     */
+    public function test_documents_query_result_is_cached(): void
+    {
+        Bus::fake();
+
+        $user = $this->authenticateAndSeedDocumentsCache(2);
+
+        $query = '
+            query {
+                documents {
+                    data { id }
+                    paginatorInfo { total }
+                }
+            }
+        ';
+
+        // Second request — should still return the same total (served from cache).
+        // To prove cache is being used, add a new document AFTER caching.
+        Document::factory()->create(['user_id' => $user->id]);
+
+        $secondResponse = $this->graphQL($query);
+        // Still 2 because the cache has not been invalidated yet.
+        $secondResponse->assertJsonPath('data.documents.paginatorInfo.total', 2);
+    }
+
+    /**
+     * Test 4: Uploading a document invalidates the documents cache.
+     *
+     * After an upload, the cache entry created by the documents query
+     * must be deleted so the next query hits the DB and returns fresh data.
+     */
+    public function test_upload_invalidates_documents_cache(): void
+    {
+        Storage::fake('local');
+        Bus::fake();
+
+        $user = $this->authenticateAndSeedDocumentsCache(2);
+
+        $versionKey = "documents.user.{$user->id}.version";
+
+        // 2. Upload a new document — fires DocumentUploaded → InvalidateDocumentsCache.
+        $file = UploadedFile::fake()->createWithContent('new.pdf', '%PDF-1.4 Fake PDF Content');
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
+        $response->assertStatus(201);
+
+        // 3. The version counter should now be 2 (incremented by the listener).
+        // All subsequent queries will use key v2.* — a cache miss, so fresh data is fetched.
+        $this->assertEquals(2, (int) Cache::get($versionKey), 'Version counter should be 2 after upload (invalidated).');
+    }
+
+    /**
+     * Test 5: A file with incorrect MIME type is rejected.
+     */
+    public function test_invalid_pdf_mime_type_is_rejected(): void
+    {
+        Storage::fake('local');
+        Bus::fake();
+
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // Create a fake image file testing with mime type diferent to pdf
+        $file = UploadedFile::fake()->createWithContent('image.jpg', 'image/jpeg');
+
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('file');
+        $this->assertStringContainsString('file of type', $response->json('errors.file.0') ?? $response->json('message'));
+    }
+
+    /**
+     * Test 6: A file disguised as a PDF (bad magic bytes) is rejected.
+     */
+    public function test_invalid_pdf_magic_bytes_is_rejected(): void
+    {
+        Storage::fake('local');
+        Bus::fake();
+
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // Create a text file but give it a PDF extension and MIME type
+        $file = UploadedFile::fake()->createWithContent('fake.pdf', 'This is a text file pretending to be a PDF.');
+
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('file');
+        $this->assertStringContainsString('The document content is not a valid PDF', $response->json('errors.file.0') ?? $response->json('message'));
+    }
+
+    /**
+     * Test 7: Multi-tenant isolation. A user cannot query another user's documents.
+     */
+    public function test_multi_tenant_isolation(): void
+    {
+        Bus::fake();
+
+        $user1 = User::factory()->create();
+        $user2 = User::factory()->create();
+
+        $doc1 = Document::factory()->create(['user_id' => $user1->id, 'title' => 'User1 Document']);
+        $doc2 = Document::factory()->create(['user_id' => $user2->id, 'title' => 'User2 Document']);
+
+        $token = $user1->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        $response = $this->graphQL('query { documents { data { id title } } }');
+
+        // Should only see User1's document
+        $data = $response->json('data.documents.data');
+        $this->assertCount(1, $data);
+        $this->assertEquals('User1 Document', $data[0]['title']);
+    }
+
+    /**
+     * Test 8: MIME Spoofing. A pure PHP file sent with 'application/pdf' HTTP Content-Type.
+     * PHP's finfo should detect it's not actually a PDF.
+     */
+    public function test_rejects_pure_php_file_with_spoofed_pdf_mime_type(): void
+    {
+        Storage::fake('local');
+        Bus::fake();
+
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // Attacker creates a PHP file but tells the server it's a PDF.
+        $file = UploadedFile::fake()->createWithContent('shell.php', '<?php system("id"); ?>', 'application/pdf');
+
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('file');
+        $this->assertStringContainsString('file of type', $response->json('errors.file.0') ?? $response->json('message'));
+    }
+
+    /**
+     * Test 9: Polyglot File (PDF + PHP).
+     * Attacker sends a file with valid %PDF- magic bytes and padding to trick validation, but containing PHP code.
+     * The vulnerability relies on the server saving it and executing it.
+     * We test that Laravel's finfo aggressively detects the PHP payload and rejects it outright.
+     */
+    public function test_polyglot_file_is_rejected_by_finfo(): void
+    {
+        Storage::fake('local');
+        Bus::fake();
+
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // Polyglot: starts with PDF magic bytes, padded so it looks like a PDF, but contains a PHP shell
+        $polyglotContent = "%PDF-1.4\n".str_repeat('A', 8192)."\n<?php system('whoami'); ?>";
+        $file = UploadedFile::fake()->createWithContent('exploit.php', $polyglotContent, 'application/pdf');
+
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('file');
+        $this->assertStringContainsString('file of type', $response->json('errors.file.0') ?? $response->json('message'));
+    }
+
+    /**
+     * Test 10: Path Traversal & Null Byte Injection.
+     * Attacker tries to write outside the storage directory or trick the extension parser.
+     */
+    public function test_path_traversal_and_null_byte_injection_are_sanitized(): void
+    {
+        Storage::fake('local');
+        Bus::fake();
+
+        $user = User::factory()->create();
+        $token = $user->createToken('test-token')->plainTextToken;
+        $this->withHeaders(['Authorization' => "Bearer $token"]);
+
+        // File name attempts to traverse directories and uses a null byte.
+        $maliciousName = "../../../etc/passwd\0.pdf";
+        $file = UploadedFile::fake()->createWithContent($maliciousName, '%PDF-1.4 Fake Content', 'application/pdf');
+
+        $response = $this->postJson('/api/documents/upload', [
+            'file' => $file,
+        ]);
+        $response->assertStatus(201);
+
+        $document = Document::first();
+
+        // The file should be saved strictly in the 'documents' directory.
+        $this->assertStringStartsWith('documents/', $document->file_path);
+
+        // Str::slug() should have stripped out the slashes, dots, and null bytes completely.
+        $this->assertStringNotContainsString('../', $document->file_path);
+        $this->assertStringNotContainsString('\0', $document->file_path);
+    }
+
+    /**
+     * Test 11: ProcessDocumentJob invalidates cache when status changes.
+     */
+    public function test_process_document_job_invalidates_documents_cache(): void
+    {
+        // Prevent GenerateAutoQuizJob from running (it makes real HTTP calls and
+        // is not the subject of this test). InvalidateDocumentCacheOnCompletion
+        // still runs because DocumentProcessed fires normally.
+        Bus::fake([GenerateAutoQuizJob::class]);
+
+        $this->mock(TextExtractor::class, function ($mock) {
+            $mock->shouldReceive('extract')->andReturn([1 => 'Fake extracted text']);
+        });
+        $this->mock(EmbeddingProvider::class, function ($mock) {
+            $mock->shouldReceive('embedBatch')->andReturn([array_fill(0, 1536, 0.1)]);
+        });
+        $user = $this->authenticateAndSeedDocumentsCache(1);
+        $document = Document::first();
+
+        $versionKey = "documents.user.{$user->id}.version";
+
+        $initialVersion = (int) Cache::get($versionKey, 1);
+        Cache::put($versionKey, $initialVersion);
+
+        // Execute the job synchronously to simulate worker behavior
+        $job = new ProcessDocumentJob($document);
+        app()->call([$job, 'handle']);
+
+        // The job calls updateProgress 4 times (extracting, chunking, embedding, ready)
+        // + InvalidateDocumentCacheOnCompletion fires once when DocumentProcessed is dispatched
+        // = 5 total cache version increments.
+        $newVersion = (int) Cache::get($versionKey, 1);
+
+        $this->assertGreaterThan($initialVersion, $newVersion, 'The cache version must increment when the document status changes during processing.');
+        $this->assertEquals($initialVersion + 6, $newVersion, 'The cache version should have incremented 6 times: 4 status changes + DocumentProcessed event (InvalidateDocumentCacheOnCompletion) + 1 from DocumentUploaded listener during test setup.');
+    }
+}
