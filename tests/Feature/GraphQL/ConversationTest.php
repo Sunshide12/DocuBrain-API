@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 class ConversationTest extends TestCase
 {
-    use RefreshDatabase, MakesGraphQLRequests;
+    use MakesGraphQLRequests, RefreshDatabase;
 
     public function test_can_create_conversation_with_document()
     {
@@ -38,12 +38,12 @@ class ConversationTest extends TestCase
                 'createConversation' => [
                     'id',
                     'title',
-                    'document' => ['id']
-                ]
-            ]
+                    'document' => ['id'],
+                ],
+            ],
         ]);
 
-        $this->assertEquals("Chat sobre: test.pdf", $response->json('data.createConversation.title'));
+        $this->assertEquals('Chat sobre: test.pdf', $response->json('data.createConversation.title'));
     }
 
     public function test_can_create_global_conversation()
@@ -69,12 +69,12 @@ class ConversationTest extends TestCase
                 'createConversation' => [
                     'id',
                     'title',
-                    'document'
-                ]
-            ]
+                    'document',
+                ],
+            ],
         ]);
 
-        $this->assertEquals("Búsqueda Global", $response->json('data.createConversation.title'));
+        $this->assertEquals('Búsqueda Global', $response->json('data.createConversation.title'));
         $this->assertNull($response->json('data.createConversation.document'));
     }
 
@@ -165,8 +165,8 @@ class ConversationTest extends TestCase
 
         $response->assertJson([
             'data' => [
-                'deleteConversation' => true
-            ]
+                'deleteConversation' => true,
+            ],
         ]);
 
         $this->assertDatabaseMissing('conversations', ['id' => $conversation->id]);

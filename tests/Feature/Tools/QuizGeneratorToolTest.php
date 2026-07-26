@@ -1,40 +1,46 @@
 <?php
 
-namespace Tests\Feature\GraphQL;
+namespace Tests\Feature\Tools;
 
-use App\Agents\QuizGeneratorAgent;
-use App\DTOs\AgentContext;
+use App\Agents\Tools\QuizGeneratorTool;
 use App\DTOs\ClassifiedIntent;
+use App\DTOs\ToolContext;
 use App\Models\Conversation;
 use App\Models\Document;
 use App\Models\DocumentChunk;
 use App\Models\User;
 use App\Services\Contracts\EmbeddingProvider;
+use App\Services\Contracts\OpenRouterClient;
 use App\Services\PgvectorSimilaritySearch;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Http;
 use Mockery\MockInterface;
 use Tests\TestCase;
 
-class QuizGeneratorAgentTest extends TestCase
+class QuizGeneratorToolTest extends TestCase
 {
     use RefreshDatabase;
 
     private function fakeQuestionsResponse(array $questions): void
     {
-        Http::fake([
-            '*' => Http::response([
-                'choices' => [[
-                    'message' => ['content' => json_encode($questions)],
-                ]],
-            ], 200),
-        ]);
+        $this->mock(OpenRouterClient::class, function (MockInterface $mock) use ($questions) {
+            $mock->shouldReceive('chat')->andReturn(json_encode($questions));
+        });
+    }
+
+    private function defaultIntent(?string $topic = null): ClassifiedIntent
+    {
+        return new ClassifiedIntent(
+            intent: 'generate_quiz',
+            topic: $topic,
+            topicInDocument: true,
+            confidence: 1.0,
+        );
     }
 
     private function makeConversation(int $chunkCount = 0, int $tokensPerChunk = 200): array
     {
-        $user     = User::factory()->create();
+        $user = User::factory()->create();
         $document = Document::factory()->create(['user_id' => $user->id, 'status' => 'ready']);
 
         for ($i = 0; $i < $chunkCount; $i++) {
@@ -47,21 +53,18 @@ class QuizGeneratorAgentTest extends TestCase
         }
 
         $conversation = Conversation::factory()->create([
-            'user_id'     => $user->id,
+            'user_id' => $user->id,
             'document_id' => $document->id,
-            'agent_type'  => 'quiz_generator',
         ]);
 
         return [$user, $document, $conversation];
     }
 
-    public function test_agent_falls_back_to_uniform_sampling_when_no_topic_matches(): void
+    public function test_tool_falls_back_to_uniform_sampling_when_no_topic_matches(): void
     {
         [$user, $document, $conversation] = $this->makeConversation(chunkCount: 10, tokensPerChunk: 200);
 
-        // Topic extraction now happens upstream in IntentClassifier before the agent
-        // runs; a null topic on the context means "generic quiz request", and the
-        // agent should sample uniformly without ever touching embeddings/search.
+        // Null topic = generic quiz request; tool must sample uniformly without touching embeddings/search.
         $this->mock(EmbeddingProvider::class, function (MockInterface $mock) {
             $mock->shouldReceive('embed')->never();
         });
@@ -78,21 +81,21 @@ class QuizGeneratorAgentTest extends TestCase
             ['type' => 'flashcard', 'question' => 'Q5', 'correct_answer' => 'A5', 'explanation' => 'x'],
         ]);
 
-        $agent  = $this->app->make(QuizGeneratorAgent::class);
-        $result = $agent->handle(new AgentContext(
-            question:     'Quiz me',
+        $tool = $this->app->make(QuizGeneratorTool::class);
+        $result = $tool->execute(new ToolContext(
+            question: 'Quiz me',
             conversation: $conversation,
-            document:     $document,
-            userId:       $user->id,
+            document: $document,
+            userId: $user->id,
+            intent: $this->defaultIntent(),
         ));
 
         $this->assertEquals('quiz', $result->responseType);
         $this->assertCount(5, $result->metadata['questions']);
-        // No overflow: default 5 questions vs capacity of 6 (2000 tokens / 300)
         $this->assertEquals(0, $conversation->messages()->where('response_type', 'text')->count());
     }
 
-    public function test_agent_uses_similarity_chunks_when_topic_is_relevant(): void
+    public function test_tool_uses_similarity_chunks_when_topic_is_relevant(): void
     {
         [$user, $document, $conversation] = $this->makeConversation(chunkCount: 20, tokensPerChunk: 200);
 
@@ -114,18 +117,13 @@ class QuizGeneratorAgentTest extends TestCase
             ['type' => 'multiple_choice', 'question' => 'What does photosynthesis convert?', 'options' => ['A) Heat', 'B) Light energy', 'C) Sound', 'D) Kinetic energy'], 'correct_answer' => 'B', 'explanation' => 'x'],
         ]);
 
-        $agent  = $this->app->make(QuizGeneratorAgent::class);
-        $result = $agent->handle(new AgentContext(
-            question:     '3 questions about photosynthesis',
+        $tool = $this->app->make(QuizGeneratorTool::class);
+        $result = $tool->execute(new ToolContext(
+            question: '3 questions about photosynthesis',
             conversation: $conversation,
-            document:     $document,
-            userId:       $user->id,
-            intent:       new ClassifiedIntent(
-                intent:          'generate_quiz',
-                topic:           'photosynthesis',
-                topicInDocument: true,
-                confidence:      0.9,
-            ),
+            document: $document,
+            userId: $user->id,
+            intent: $this->defaultIntent('photosynthesis'),
         ));
 
         $this->assertEquals('quiz', $result->responseType);
@@ -133,7 +131,7 @@ class QuizGeneratorAgentTest extends TestCase
         $this->assertEquals('multiple_choice', $result->metadata['questions'][0]['type']);
     }
 
-    public function test_agent_returns_text_when_document_has_no_content(): void
+    public function test_tool_returns_text_when_document_has_no_content(): void
     {
         [$user, $document, $conversation] = $this->makeConversation(chunkCount: 0);
 
@@ -145,12 +143,13 @@ class QuizGeneratorAgentTest extends TestCase
             $mock->shouldReceive('search')->never();
         });
 
-        $agent  = $this->app->make(QuizGeneratorAgent::class);
-        $result = $agent->handle(new AgentContext(
-            question:     'Quiz me on quantum physics',
+        $tool = $this->app->make(QuizGeneratorTool::class);
+        $result = $tool->execute(new ToolContext(
+            question: 'Quiz me on quantum physics',
             conversation: $conversation,
-            document:     $document,
-            userId:       $user->id,
+            document: $document,
+            userId: $user->id,
+            intent: $this->defaultIntent(),
         ));
 
         $this->assertEquals('text', $result->responseType);
@@ -174,12 +173,13 @@ class QuizGeneratorAgentTest extends TestCase
             ['type' => 'multiple_choice', 'question' => 'Q1', 'options' => ['A) 1', 'B) 2', 'C) 3', 'D) 4'], 'correct_answer' => 'A', 'explanation' => 'x'],
         ]);
 
-        $agent  = $this->app->make(QuizGeneratorAgent::class);
-        $result = $agent->handle(new AgentContext(
-            question:     'Give me 10 questions',
+        $tool = $this->app->make(QuizGeneratorTool::class);
+        $result = $tool->execute(new ToolContext(
+            question: 'Give me 10 questions',
             conversation: $conversation,
-            document:     $document,
-            userId:       $user->id,
+            document: $document,
+            userId: $user->id,
+            intent: $this->defaultIntent(),
         ));
 
         $this->assertEquals('quiz', $result->responseType);
@@ -203,23 +203,29 @@ class QuizGeneratorAgentTest extends TestCase
             $mock->shouldReceive('search')->never();
         });
 
-        $this->fakeQuestionsResponse([
-            ['type' => 'flashcard', 'question' => 'Q1', 'correct_answer' => 'A1', 'explanation' => 'x'],
-        ]);
+        $capturedPrompt = null;
+        $this->mock(OpenRouterClient::class, function (MockInterface $mock) use (&$capturedPrompt) {
+            $mock->shouldReceive('chat')
+                ->withArgs(function (array $messages) use (&$capturedPrompt) {
+                    $capturedPrompt = $messages[0]['content'];
 
-        $agent = $this->app->make(QuizGeneratorAgent::class);
-        $agent->handle(new AgentContext(
-            question:     'Give me 50 questions',
+                    return true;
+                })
+                ->andReturn(json_encode([
+                    ['type' => 'flashcard', 'question' => 'Q1', 'correct_answer' => 'A1', 'explanation' => 'x'],
+                ]));
+        });
+
+        $tool = $this->app->make(QuizGeneratorTool::class);
+        $tool->execute(new ToolContext(
+            question: 'Give me 50 questions',
             conversation: $conversation,
-            document:     $document,
-            userId:       $user->id,
+            document: $document,
+            userId: $user->id,
+            intent: $this->defaultIntent(),
         ));
 
-        // 50 tokens/chunk * ... capacity (50*200/300=33) exceeds the hard cap of 20,
-        // so the prompt should ask for exactly 20 questions, and no overflow warning fires.
-        Http::assertSent(function ($request) {
-            return str_contains($request->data()['messages'][0]['content'], 'exactly 20 questions');
-        });
+        $this->assertStringContainsString('exactly 20 questions', $capturedPrompt);
         $this->assertEquals(0, $conversation->messages()->where('response_type', 'text')->count());
     }
 
@@ -230,7 +236,6 @@ class QuizGeneratorAgentTest extends TestCase
         $conversation->messages()->create(['role' => 'user', 'content' => 'Make 3 flashcards']);
         $conversation->messages()->create(['role' => 'assistant', 'content' => 'huge formatted quiz text...', 'response_type' => 'quiz']);
         $conversation->messages()->create(['role' => 'user', 'content' => 'Now make 5 true/false questions']);
-        // Mirrors what SendMessage.php does: the current question is persisted before the agent runs.
         $conversation->messages()->create(['role' => 'user', 'content' => 'Quiz me on the previous topics']);
 
         $this->mock(EmbeddingProvider::class, function (MockInterface $mock) {
@@ -241,24 +246,31 @@ class QuizGeneratorAgentTest extends TestCase
             $mock->shouldReceive('search')->never();
         });
 
-        $this->fakeQuestionsResponse([
-            ['type' => 'true_false', 'question' => 'Q1', 'correct_answer' => 'True', 'explanation' => 'x'],
-        ]);
+        $capturedPrompt = null;
+        $this->mock(OpenRouterClient::class, function (MockInterface $mock) use (&$capturedPrompt) {
+            $mock->shouldReceive('chat')
+                ->withArgs(function (array $messages) use (&$capturedPrompt) {
+                    $capturedPrompt = $messages[0]['content'];
 
-        $agent = $this->app->make(QuizGeneratorAgent::class);
-        $agent->handle(new AgentContext(
-            question:     'Quiz me on the previous topics',
+                    return true;
+                })
+                ->andReturn(json_encode([
+                    ['type' => 'true_false', 'question' => 'Q1', 'correct_answer' => 'True', 'explanation' => 'x'],
+                ]));
+        });
+
+        $tool = $this->app->make(QuizGeneratorTool::class);
+        $tool->execute(new ToolContext(
+            question: 'Quiz me on the previous topics',
             conversation: $conversation,
-            document:     $document,
-            userId:       $user->id,
+            document: $document,
+            userId: $user->id,
+            intent: $this->defaultIntent(),
         ));
 
-        Http::assertSent(function ($request) {
-            $prompt = $request->data()['messages'][0]['content'];
-            return str_contains($prompt, 'Previous Requests')
-                && str_contains($prompt, 'Make 3 flashcards')
-                && str_contains($prompt, 'Now make 5 true/false questions')
-                && !str_contains($prompt, 'huge formatted quiz text');
-        });
+        $this->assertStringContainsString('Previous Requests', $capturedPrompt);
+        $this->assertStringContainsString('Make 3 flashcards', $capturedPrompt);
+        $this->assertStringContainsString('Now make 5 true/false questions', $capturedPrompt);
+        $this->assertStringNotContainsString('huge formatted quiz text', $capturedPrompt);
     }
 }

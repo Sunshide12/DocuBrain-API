@@ -2,9 +2,12 @@
 
 namespace Tests\Feature\GraphQL;
 
+use App\Jobs\GenerateAutoQuizJob;
 use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
 use App\Models\User;
+use App\Services\Contracts\EmbeddingProvider;
+use App\Services\Contracts\TextExtractor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Bus;
@@ -15,8 +18,8 @@ use Tests\TestCase;
 
 class DocumentTest extends TestCase
 {
-    use RefreshDatabase;
     use MakesGraphQLRequests;
+    use RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -308,9 +311,9 @@ class DocumentTest extends TestCase
     }
 
     /**
-     * Test 9: Polyglot File (PDF + PHP). 
+     * Test 9: Polyglot File (PDF + PHP).
      * Attacker sends a file with valid %PDF- magic bytes and padding to trick validation, but containing PHP code.
-     * The vulnerability relies on the server saving it and executing it. 
+     * The vulnerability relies on the server saving it and executing it.
      * We test that Laravel's finfo aggressively detects the PHP payload and rejects it outright.
      */
     public function test_polyglot_file_is_rejected_by_finfo(): void
@@ -323,7 +326,7 @@ class DocumentTest extends TestCase
         $this->withHeaders(['Authorization' => "Bearer $token"]);
 
         // Polyglot: starts with PDF magic bytes, padded so it looks like a PDF, but contains a PHP shell
-        $polyglotContent = "%PDF-1.4\n" . str_repeat("A", 8192) . "\n<?php system('whoami'); ?>";
+        $polyglotContent = "%PDF-1.4\n".str_repeat('A', 8192)."\n<?php system('whoami'); ?>";
         $file = UploadedFile::fake()->createWithContent('exploit.php', $polyglotContent, 'application/pdf');
 
         $response = $this->postJson('/api/documents/upload', [
@@ -375,12 +378,12 @@ class DocumentTest extends TestCase
         // Prevent GenerateAutoQuizJob from running (it makes real HTTP calls and
         // is not the subject of this test). InvalidateDocumentCacheOnCompletion
         // still runs because DocumentProcessed fires normally.
-        Bus::fake([\App\Jobs\GenerateAutoQuizJob::class]);
+        Bus::fake([GenerateAutoQuizJob::class]);
 
-        $this->mock(\App\Services\Contracts\TextExtractor::class, function ($mock) {
+        $this->mock(TextExtractor::class, function ($mock) {
             $mock->shouldReceive('extract')->andReturn([1 => 'Fake extracted text']);
         });
-        $this->mock(\App\Services\Contracts\EmbeddingProvider::class, function ($mock) {
+        $this->mock(EmbeddingProvider::class, function ($mock) {
             $mock->shouldReceive('embedBatch')->andReturn([array_fill(0, 1536, 0.1)]);
         });
         $user = $this->authenticateAndSeedDocumentsCache(1);

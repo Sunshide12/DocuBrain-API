@@ -45,8 +45,8 @@ final class InvalidateDocumentsCache
 {
     public function handle(DocumentUploaded $event): void
     {
-        $userId      = $event->document->user_id;
-        $versionKey  = "documents.user.{$userId}.version";
+        $userId = $event->document->user_id;
+        $versionKey = "documents.user.{$userId}.version";
 
         // Increment the version counter. If the key doesn't exist yet, this
         // creates it with value 1 and then increments to 2 — which is fine,

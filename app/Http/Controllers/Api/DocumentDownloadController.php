@@ -17,7 +17,7 @@ class DocumentDownloadController extends Controller
             abort(403, 'Unauthorized.');
         }
 
-        if (!Storage::disk('local')->exists($document->file_path)) {
+        if (! Storage::disk('local')->exists($document->file_path)) {
             abort(404, 'Document file not found.');
         }
 

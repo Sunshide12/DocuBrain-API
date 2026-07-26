@@ -15,10 +15,10 @@ class QuizFactory extends Factory
     public function definition(): array
     {
         return [
-            'document_id'   => Document::factory(),
-            'user_id'       => User::factory(),
-            'title'         => 'Auto-generated Quiz: ' . $this->faker->words(3, true),
-            'status'        => 'ready',
+            'document_id' => Document::factory(),
+            'user_id' => User::factory(),
+            'title' => 'Auto-generated Quiz: '.$this->faker->words(3, true),
+            'status' => 'ready',
             'error_message' => null,
         ];
     }
@@ -31,7 +31,7 @@ class QuizFactory extends Factory
     public function failed(): static
     {
         return $this->state([
-            'status'        => 'failed',
+            'status' => 'failed',
             'error_message' => 'LLM returned malformed JSON.',
         ]);
     }

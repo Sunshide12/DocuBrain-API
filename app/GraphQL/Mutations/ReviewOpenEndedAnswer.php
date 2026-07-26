@@ -41,20 +41,20 @@ Output ONLY a valid JSON object, no surrounding text, no markdown fences:
 EOT;
 
         $baseUrl = config('services.openrouter.base_url');
-        $apiKey  = config('services.openrouter.api_key');
-        $model   = config('services.openrouter.llm_model');
+        $apiKey = config('services.openrouter.api_key');
+        $model = config('services.openrouter.llm_model');
 
         $response = Http::withToken($apiKey)
             ->timeout(30)
-            ->post(rtrim($baseUrl, '/') . '/chat/completions', [
-                'model'    => $model,
+            ->post(rtrim($baseUrl, '/').'/chat/completions', [
+                'model' => $model,
                 'messages' => [
                     ['role' => 'user', 'content' => $prompt],
                 ],
             ]);
 
         if ($response->failed()) {
-            throw new \Exception("OpenRouter API error: " . $response->status() . " - " . $response->body());
+            throw new \Exception('OpenRouter API error: '.$response->status().' - '.$response->body());
         }
 
         $raw = trim($response->json('choices.0.message.content') ?? '');
@@ -64,13 +64,13 @@ EOT;
         $parsed = json_decode($raw, true);
 
         $score = strtolower($parsed['score'] ?? '');
-        if (!in_array($score, self::VALID_SCORES, true)) {
+        if (! in_array($score, self::VALID_SCORES, true)) {
             $score = 'partial';
         }
 
         return [
-            'score'     => $score,
-            'feedback'  => $parsed['feedback'] ?? $raw,
+            'score' => $score,
+            'feedback' => $parsed['feedback'] ?? $raw,
             'isCorrect' => in_array($score, ['excellent', 'good'], true),
         ];
     }

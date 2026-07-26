@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Http;
 class OpenRouterEmbeddingProvider implements EmbeddingProvider
 {
     /**
-     * @param string $text
      * @return array<float>
      */
     public function embed(string $text): array
@@ -17,7 +16,7 @@ class OpenRouterEmbeddingProvider implements EmbeddingProvider
     }
 
     /**
-     * @param string[] $texts
+     * @param  string[]  $texts
      * @return array<int, array<float>>
      */
     public function embedBatch(array $texts): array
@@ -33,19 +32,19 @@ class OpenRouterEmbeddingProvider implements EmbeddingProvider
         foreach ($chunks as $batch) {
             $response = Http::withToken($apiKey)
                 ->timeout(30)
-                ->post(rtrim($baseUrl, '/') . '/embeddings', [
+                ->post(rtrim($baseUrl, '/').'/embeddings', [
                     'model' => $model,
                     'input' => $batch,
                 ]);
 
             if ($response->failed()) {
                 // Si es 429 u otro error HTTP, lanzar excepción con body
-                throw new \Exception("Error OpenRouter API Embeddings: " . $response->status() . " - " . $response->body());
+                throw new \Exception('Error OpenRouter API Embeddings: '.$response->status().' - '.$response->body());
             }
 
             $data = $response->json('data');
-            if (!is_array($data)) {
-                throw new \Exception("Estructura de respuesta inesperada en OpenRouter Embeddings: " . $response->body());
+            if (! is_array($data)) {
+                throw new \Exception('Estructura de respuesta inesperada en OpenRouter Embeddings: '.$response->body());
             }
 
             // Los resultados pueden no venir ordenados, usamos el index devuelto
@@ -53,10 +52,10 @@ class OpenRouterEmbeddingProvider implements EmbeddingProvider
             foreach ($data as $item) {
                 $batchEmbeddings[$item['index']] = $item['embedding'];
             }
-            
+
             // Ordenar por index por si la API los devuelve en desorden
             ksort($batchEmbeddings);
-            
+
             $allEmbeddings = array_merge($allEmbeddings, array_values($batchEmbeddings));
         }
 

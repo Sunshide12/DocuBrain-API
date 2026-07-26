@@ -10,8 +10,8 @@ use Tests\TestCase;
 
 class AuthTest extends TestCase
 {
-    use RefreshDatabase;
     use MakesGraphQLRequests;
+    use RefreshDatabase;
 
     /**
      * Test user registration.
@@ -101,7 +101,6 @@ class AuthTest extends TestCase
     /**
      * Test user me query
      */
-
     public function test_user_can_me(): void
     {
         $user = User::create([

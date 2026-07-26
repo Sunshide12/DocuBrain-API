@@ -2,10 +2,10 @@
 
 namespace App\GraphQL\Subscriptions;
 
+use App\Models\Document;
 use Illuminate\Http\Request;
 use Nuwave\Lighthouse\Schema\Types\GraphQLSubscription;
 use Nuwave\Lighthouse\Subscriptions\Subscriber;
-use App\Models\Document;
 
 class DocumentProgress extends GraphQLSubscription
 {
@@ -39,6 +39,7 @@ class DocumentProgress extends GraphQLSubscription
 
         // Global subscription for the user, check if the document belongs to the user
         $document = Document::find($root['document_id']);
+
         return $document && $document->user_id == $subscriber->context->user()->id;
     }
 }

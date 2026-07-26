@@ -20,8 +20,10 @@ final class GenerateAutoQuizJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries   = 2;
+    public int $tries = 2;
+
     public int $backoff = 30;
+
     public int $timeout = 300;
 
     public function __construct(
@@ -32,9 +34,9 @@ final class GenerateAutoQuizJob implements ShouldQueue
     {
         $quiz = Quiz::create([
             'document_id' => $this->document->id,
-            'user_id'     => $this->document->user_id,
-            'title'       => 'Auto-generated Quiz: ' . ($this->document->title ?? $this->document->original_name),
-            'status'      => 'generating',
+            'user_id' => $this->document->user_id,
+            'title' => 'Auto-generated Quiz: '.($this->document->title ?? $this->document->original_name),
+            'status' => 'generating',
         ]);
 
         try {
@@ -43,32 +45,33 @@ final class GenerateAutoQuizJob implements ShouldQueue
             if ($chunks->isEmpty()) {
                 $quiz->update(['status' => 'failed', 'error_message' => 'Document has no text chunks.']);
                 $this->broadcastCompleted($quiz, 'failed');
+
                 return;
             }
 
-            $sections  = $this->groupChunksIntoSections($chunks->all(), 1500);
+            $sections = $this->groupChunksIntoSections($chunks->all(), 1500);
             $sortOrder = 0;
-            $rows      = [];
+            $rows = [];
 
             foreach (array_slice($sections, 0, 5) as $section) {
                 $questions = $this->generateQuestionsForSection($section);
                 foreach ($questions as $q) {
                     $rows[] = [
-                        'quiz_id'        => $quiz->id,
-                        'question'       => $q['question']       ?? '',
-                        'type'           => $q['type']           ?? 'flashcard',
-                        'options'        => isset($q['options']) ? json_encode($q['options']) : null,
+                        'quiz_id' => $quiz->id,
+                        'question' => $q['question'] ?? '',
+                        'type' => $q['type'] ?? 'flashcard',
+                        'options' => isset($q['options']) ? json_encode($q['options']) : null,
                         'correct_answer' => $q['correct_answer'] ?? '',
-                        'explanation'    => $q['explanation']    ?? null,
-                        'page_number'    => $section['start_page'] ?? null,
-                        'sort_order'     => $sortOrder++,
-                        'created_at'     => now(),
-                        'updated_at'     => now(),
+                        'explanation' => $q['explanation'] ?? null,
+                        'page_number' => $section['start_page'] ?? null,
+                        'sort_order' => $sortOrder++,
+                        'created_at' => now(),
+                        'updated_at' => now(),
                     ];
                 }
             }
 
-            if (!empty($rows)) {
+            if (! empty($rows)) {
                 QuizQuestion::insert($rows);
             }
 
@@ -77,8 +80,8 @@ final class GenerateAutoQuizJob implements ShouldQueue
 
             Log::info('GenerateAutoQuizJob completed', [
                 'document_id' => $this->document->id,
-                'quiz_id'     => $quiz->id,
-                'questions'   => count($rows),
+                'quiz_id' => $quiz->id,
+                'questions' => count($rows),
             ]);
         } catch (\Throwable $e) {
             $quiz->update(['status' => 'failed', 'error_message' => $e->getMessage()]);
@@ -86,7 +89,7 @@ final class GenerateAutoQuizJob implements ShouldQueue
 
             Log::error('GenerateAutoQuizJob failed', [
                 'document_id' => $this->document->id,
-                'error'       => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
 
             throw $e;
@@ -95,25 +98,25 @@ final class GenerateAutoQuizJob implements ShouldQueue
 
     private function groupChunksIntoSections(array $chunks, int $targetWords): array
     {
-        $sections    = [];
-        $current     = ['chunks' => [], 'word_count' => 0, 'start_page' => null];
+        $sections = [];
+        $current = ['chunks' => [], 'word_count' => 0, 'start_page' => null];
 
         foreach ($chunks as $chunk) {
             if ($current['start_page'] === null) {
                 $current['start_page'] = $chunk->page_number;
             }
 
-            $current['chunks'][]    = $chunk->content;
+            $current['chunks'][] = $chunk->content;
             $current['word_count'] += (int) $chunk->token_count;
 
             if ($current['word_count'] >= $targetWords) {
                 $current['end_page'] = $chunk->page_number;
-                $sections[]          = $current;
-                $current             = ['chunks' => [], 'word_count' => 0, 'start_page' => null];
+                $sections[] = $current;
+                $current = ['chunks' => [], 'word_count' => 0, 'start_page' => null];
             }
         }
 
-        if (!empty($current['chunks'])) {
+        if (! empty($current['chunks'])) {
             $sections[] = $current;
         }
 
@@ -122,10 +125,10 @@ final class GenerateAutoQuizJob implements ShouldQueue
 
     private function generateQuestionsForSection(array $section): array
     {
-        $content    = implode("\n\n", $section['chunks']);
-        $startPage  = $section['start_page'] ?? 'N/A';
-        $endPage    = $section['end_page']   ?? $startPage;
-        $n          = 2;
+        $content = implode("\n\n", $section['chunks']);
+        $startPage = $section['start_page'] ?? 'N/A';
+        $endPage = $section['end_page'] ?? $startPage;
+        $n = 2;
 
         $prompt = <<<EOT
 You are an educational quiz generator. Analyze the following section of a
@@ -162,20 +165,20 @@ document and generate study questions to help a student prepare for an exam.
 EOT;
 
         $baseUrl = config('services.openrouter.base_url');
-        $apiKey  = config('services.openrouter.api_key');
-        $model   = config('services.openrouter.llm_model');
+        $apiKey = config('services.openrouter.api_key');
+        $model = config('services.openrouter.llm_model');
 
         $response = Http::withToken($apiKey)
             ->timeout(60)
-            ->post(rtrim($baseUrl, '/') . '/chat/completions', [
-                'model'    => $model,
+            ->post(rtrim($baseUrl, '/').'/chat/completions', [
+                'model' => $model,
                 'messages' => [
                     ['role' => 'user', 'content' => $prompt],
                 ],
             ]);
 
         if ($response->failed()) {
-            throw new \Exception("OpenRouter API error: " . $response->status() . " - " . $response->body());
+            throw new \Exception('OpenRouter API error: '.$response->status().' - '.$response->body());
         }
 
         $raw = trim($response->json('choices.0.message.content') ?? '');
@@ -186,7 +189,7 @@ EOT;
 
         $parsed = json_decode($raw, true);
 
-        if (!is_array($parsed)) {
+        if (! is_array($parsed)) {
             throw new \Exception("LLM returned malformed JSON for quiz section: {$raw}");
         }
 
@@ -198,7 +201,7 @@ EOT;
         try {
             QuizGenerationCompleted::dispatch($quiz, $this->document->user_id, $status);
         } catch (\Throwable $e) {
-            Log::error('Failed to broadcast QuizGenerationCompleted: ' . $e->getMessage());
+            Log::error('Failed to broadcast QuizGenerationCompleted: '.$e->getMessage());
         }
     }
 }

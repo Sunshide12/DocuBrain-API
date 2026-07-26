@@ -39,7 +39,7 @@ class DatabaseSeeder extends Seeder
 
         // Usuario fijo para acceso manual / GraphQL Playground
         $demoUser = User::factory()->create([
-            'name'  => 'Demo User',
+            'name' => 'Demo User',
             'email' => 'demo@docubrain.dev',
         ]);
 

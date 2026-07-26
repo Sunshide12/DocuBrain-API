@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -14,14 +15,14 @@ return new class extends Migration
         // First, deduplicate existing conversations
         // Keep the oldest conversation for each (user_id, document_id) pair
         // and delete duplicates along with their messages (cascaded)
-        \Illuminate\Support\Facades\DB::statement("
+        DB::statement('
             DELETE FROM conversations
             WHERE id NOT IN (
                 SELECT MIN(id)
                 FROM conversations
                 GROUP BY user_id, document_id
             )
-        ");
+        ');
 
         Schema::table('conversations', function (Blueprint $table) {
             // Add unique constraint on (user_id, document_id)

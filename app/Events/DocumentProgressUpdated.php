@@ -33,7 +33,7 @@ final class DocumentProgressUpdated implements ShouldBroadcastNow
     {
         // Broadcast on a private channel specific to the user
         return [
-            new PrivateChannel('App.Models.User.' . $this->userId),
+            new PrivateChannel('App.Models.User.'.$this->userId),
         ];
     }
 
@@ -46,9 +46,9 @@ final class DocumentProgressUpdated implements ShouldBroadcastNow
     {
         return [
             'document_id' => $this->documentId,
-            'status'      => $this->status,
-            'message'     => $this->message,
-            'progress'    => $this->progress,
+            'status' => $this->status,
+            'message' => $this->message,
+            'progress' => $this->progress,
         ];
     }
 }

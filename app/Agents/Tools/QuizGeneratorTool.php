@@ -1,36 +1,36 @@
 <?php
 
-namespace App\Agents;
+declare(strict_types=1);
 
-use App\DTOs\AgentContext;
-use App\DTOs\AgentResponse;
-use App\Services\Contracts\AgentHandler;
-use App\Services\Contracts\EmbeddingProvider;
-use App\Services\PgvectorSimilaritySearch;
+namespace App\Agents\Tools;
+
+use App\DTOs\ToolContext;
+use App\DTOs\ToolResponse;
 use App\Models\Quiz;
 use App\Models\QuizQuestion;
+use App\Services\Contracts\AgentTool;
+use App\Services\Contracts\EmbeddingProvider;
+use App\Services\Contracts\OpenRouterClient;
+use App\Services\PgvectorSimilaritySearch;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Http;
 
-class QuizGeneratorAgent implements AgentHandler
+class QuizGeneratorTool implements AgentTool
 {
     // Similarity search runs at a lower threshold than Q&A: we only need to detect
     // whether the user mentioned a topic, not find a precise answer.
     private const TOPIC_SIMILARITY_THRESHOLD = 0.35;
 
-    // Below this many relevant chunks, we treat the request as "quiz me on the whole doc"
-    // rather than "quiz me on topic X", and fall back to uniform sampling.
-    private const MIN_TOPIC_CHUNKS = 3;
-
     private const DEFAULT_QUESTION_COUNT = 5;
-    private const MAX_QUESTION_COUNT     = 20;
+
+    private const MAX_QUESTION_COUNT = 20;
 
     // Rough floor for how many tokens of context a single well-formed question needs.
     private const TOKENS_PER_QUESTION = 300;
 
     public function __construct(
-        private readonly EmbeddingProvider        $embeddingProvider,
+        private readonly EmbeddingProvider $embeddingProvider,
         private readonly PgvectorSimilaritySearch $similaritySearch,
+        private readonly OpenRouterClient $openRouter,
     ) {}
 
     public function key(): string
@@ -48,89 +48,69 @@ class QuizGeneratorAgent implements AgentHandler
         return 'Generates study questions, flashcards, and quizzes from your documents to help you prepare for exams.';
     }
 
-    public function supportedIntents(): array
+    public function requiresDocument(): bool
     {
-        return ['generate_quiz'];
+        return true;
     }
 
-    public function handle(AgentContext $context): AgentResponse
+    public function execute(ToolContext $context): ToolResponse
     {
-        if ($context->intent?->isChat()) {
-            return new AgentResponse(
-                answer: '¡Hola! Soy el generador de quizzes. Puedes pedirme que genere preguntas o flashcards sobre este documento, o de algún tema en específico.',
-                responseType: 'text',
-            );
-        }
-
-        if ($context->intent?->isTopicMissing()) {
+        if ($context->intent->isTopicMissing()) {
             $topic = $context->intent->topic;
-            return new AgentResponse(
+
+            return new ToolResponse(
                 answer: "No encontré información sobre \"{$topic}\" en este documento. Solo puedo generar preguntas basándome en el contenido del PDF. ¿Te gustaría que te haga preguntas sobre los temas que sí contiene? 😊",
-                responseType: 'text',
+                agentKey: $this->key(),
             );
         }
 
         $question = $context->question;
         $document = $context->document;
 
-        if (!$document) {
-            return new AgentResponse(
-                answer:       'Please select a document to generate a quiz from.',
-                responseType: 'text',
+        if (! $document) {
+            return new ToolResponse(
+                answer: 'Please select a document to generate a quiz from.',
+                agentKey: $this->key(),
             );
         }
 
         $requestedCount = min($this->extractQuestionCount($question), self::MAX_QUESTION_COUNT);
 
         $totalTokens = (int) $document->chunks()->sum('token_count');
-        $capacity    = intdiv($totalTokens, self::TOKENS_PER_QUESTION);
+        $capacity = intdiv($totalTokens, self::TOKENS_PER_QUESTION);
 
         $effectiveCount = $requestedCount;
         if ($capacity > 0 && $requestedCount > $capacity) {
             $effectiveCount = max(1, min($requestedCount, $capacity));
 
             $context->conversation->messages()->create([
-                'role'          => 'assistant',
-                'content'       => "You asked for {$requestedCount} questions, but this document only has enough content for about {$effectiveCount}. I generated {$effectiveCount} questions instead.",
+                'role' => 'assistant',
+                'content' => "You asked for {$requestedCount} questions, but this document only has enough content for about {$effectiveCount}. I generated {$effectiveCount} questions instead.",
                 'response_type' => 'text',
+                'agent_key' => $this->key(),
             ]);
         }
 
         $chunks = $this->selectChunks($context, $document, $question, $effectiveCount);
 
         if ($chunks->isEmpty()) {
-            return new AgentResponse(
+            return new ToolResponse(
                 answer: 'I could not find relevant content in your document to generate study material. Try rephrasing your request or asking about a specific topic in the document.',
-                responseType: 'text',
+                agentKey: $this->key(),
             );
         }
 
         $contextChunks = implode("\n\n---\n\n", $chunks->map(function ($chunk) {
-            return "Page " . ($chunk->page_number ?? 'N/A') . ":\n" . $chunk->content;
+            return 'Page '.($chunk->page_number ?? 'N/A').":\n".$chunk->content;
         })->all());
 
         $historySection = $this->buildHistorySection($context);
 
         $prompt = $this->buildPrompt($question, $contextChunks, $historySection, $effectiveCount);
 
-        $baseUrl = config('services.openrouter.base_url');
-        $apiKey  = config('services.openrouter.api_key');
-        $model   = config('services.openrouter.llm_model');
-
-        $response = Http::withToken($apiKey)
-            ->timeout(60)
-            ->post(rtrim($baseUrl, '/') . '/chat/completions', [
-                'model'    => $model,
-                'messages' => [
-                    ['role' => 'user', 'content' => $prompt],
-                ],
-            ]);
-
-        if ($response->failed()) {
-            throw new \Exception("OpenRouter API error: " . $response->status() . " - " . $response->body());
-        }
-
-        $raw = trim($response->json('choices.0.message.content') ?? '');
+        $raw = $this->openRouter->chat([
+            ['role' => 'user', 'content' => $prompt],
+        ], ['timeout' => 60]);
 
         // Strip markdown fences if the LLM added them
         $raw = preg_replace('/^```(?:json)?\s*/i', '', $raw);
@@ -138,11 +118,11 @@ class QuizGeneratorAgent implements AgentHandler
 
         $questions = json_decode($raw, true);
 
-        if (!is_array($questions)) {
+        if (! is_array($questions)) {
             // LLM returned non-JSON — return raw text as a fallback
-            return new AgentResponse(
-                answer:       $raw,
-                responseType: 'text',
+            return new ToolResponse(
+                answer: $raw,
+                agentKey: $this->key(),
             );
         }
 
@@ -151,50 +131,51 @@ class QuizGeneratorAgent implements AgentHandler
         // Save the quiz to the database so it appears in the UI
         $quiz = Quiz::create([
             'document_id' => $document->id,
-            'user_id'     => $context->userId,
-            'title'       => 'Quiz: ' . substr($question, 0, 30) . (strlen($question) > 30 ? '...' : ''),
-            'status'      => 'ready',
+            'user_id' => $context->userId,
+            'title' => 'Quiz: '.substr($question, 0, 30).(strlen($question) > 30 ? '...' : ''),
+            'status' => 'ready',
         ]);
 
         $sortOrder = 0;
-        $rows      = [];
+        $rows = [];
         foreach ($questions as $q) {
             $rows[] = [
-                'quiz_id'        => $quiz->id,
-                'question'       => $q['question']       ?? '',
-                'type'           => $q['type']           ?? 'multiple_choice',
-                'options'        => isset($q['options']) ? json_encode($q['options']) : null,
+                'quiz_id' => $quiz->id,
+                'question' => $q['question'] ?? '',
+                'type' => $q['type'] ?? 'multiple_choice',
+                'options' => isset($q['options']) ? json_encode($q['options']) : null,
                 'correct_answer' => $q['correct_answer'] ?? '',
-                'explanation'    => $q['explanation']    ?? null,
-                'sort_order'     => $sortOrder++,
-                'created_at'     => now(),
-                'updated_at'     => now(),
+                'explanation' => $q['explanation'] ?? null,
+                'sort_order' => $sortOrder++,
+                'created_at' => now(),
+                'updated_at' => now(),
             ];
         }
 
-        if (!empty($rows)) {
+        if (! empty($rows)) {
             QuizQuestion::insert($rows);
         }
 
-        return new AgentResponse(
-            answer:       $answer,
+        return new ToolResponse(
+            answer: $answer,
+            agentKey: $this->key(),
             responseType: 'quiz',
-            metadata:     ['questions' => $questions, 'quiz_id' => $quiz->id],
+            metadata: ['questions' => $questions, 'quiz_id' => $quiz->id],
         );
     }
 
-    private function selectChunks(AgentContext $context, $document, string $question, int $effectiveCount): Collection
+    private function selectChunks(ToolContext $context, $document, string $question, int $effectiveCount): Collection
     {
         // If the user specified a valid topic, use it for similarity search.
-        if ($context->intent?->topic) {
+        if ($context->intent->topic) {
             $topicVector = $this->embeddingProvider->embed($context->intent->topic);
 
             return $this->similaritySearch->search(
                 queryVector: $topicVector,
-                userId:      $context->userId,
-                documentId:  $document->id,
-                threshold:   self::TOPIC_SIMILARITY_THRESHOLD,
-                limit:       $effectiveCount * 2,
+                userId: $context->userId,
+                documentId: $document->id,
+                threshold: self::TOPIC_SIMILARITY_THRESHOLD,
+                limit: $effectiveCount * 2,
             );
         }
 
@@ -215,7 +196,7 @@ class QuizGeneratorAgent implements AgentHandler
         }
 
         $needed = min($effectiveCount * 2, $total);
-        $step   = max(1, (int) floor($total / $needed));
+        $step = max(1, (int) floor($total / $needed));
 
         $sampled = collect();
         for ($i = 0; $i < $total && $sampled->count() < $needed; $i += $step) {
@@ -229,7 +210,7 @@ class QuizGeneratorAgent implements AgentHandler
      * Last 3 USER messages only (not assistant replies, which can contain a full
      * formatted quiz and would bloat the prompt). Excludes the current message.
      */
-    private function buildHistorySection(AgentContext $context): string
+    private function buildHistorySection(ToolContext $context): string
     {
         $recentUserMessages = $context->conversation->messages()
             ->where('role', 'user')
@@ -246,7 +227,7 @@ class QuizGeneratorAgent implements AgentHandler
 
         $previous = array_slice($recentUserMessages, 0, -1);
 
-        return "## Previous Requests\n" . implode("\n", array_map(fn($m) => "- {$m}", $previous)) . "\n";
+        return "## Previous Requests\n".implode("\n", array_map(fn ($m) => "- {$m}", $previous))."\n";
     }
 
     private function extractQuestionCount(string $question): int
@@ -299,22 +280,22 @@ EOT;
     {
         $lines = [];
         foreach ($questions as $i => $q) {
-            $num  = $i + 1;
+            $num = $i + 1;
             $type = $q['type'] ?? 'question';
             $lines[] = "**Question {$num}** ({$type})";
             $lines[] = $q['question'] ?? '';
 
-            if (!empty($q['options']) && is_array($q['options'])) {
+            if (! empty($q['options']) && is_array($q['options'])) {
                 foreach ($q['options'] as $option) {
                     $lines[] = "  {$option}";
                 }
             }
 
-            if (!empty($q['correct_answer'])) {
-                $lines[] = "**Answer:** " . $q['correct_answer'];
+            if (! empty($q['correct_answer'])) {
+                $lines[] = '**Answer:** '.$q['correct_answer'];
             }
-            if (!empty($q['explanation'])) {
-                $lines[] = "*" . $q['explanation'] . "*";
+            if (! empty($q['explanation'])) {
+                $lines[] = '*'.$q['explanation'].'*';
             }
             $lines[] = '';
         }

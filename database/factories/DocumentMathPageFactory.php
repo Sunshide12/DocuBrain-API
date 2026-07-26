@@ -16,7 +16,7 @@ class DocumentMathPageFactory extends Factory
         return [
             'document_id' => Document::factory(),
             'page_number' => $this->faker->numberBetween(1, 50),
-            'content'     => $this->faker->paragraph() . ' $x^2 + ' . $this->faker->numberBetween(1, 10) . 'x + ' . $this->faker->numberBetween(1, 20) . ' = 0$',
+            'content' => $this->faker->paragraph().' $x^2 + '.$this->faker->numberBetween(1, 10).'x + '.$this->faker->numberBetween(1, 20).' = 0$',
         ];
     }
 }

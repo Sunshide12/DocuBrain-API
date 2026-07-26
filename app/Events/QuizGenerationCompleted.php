@@ -16,15 +16,15 @@ final class QuizGenerationCompleted implements ShouldBroadcastNow
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
-        public readonly Quiz   $quiz,
-        public readonly int    $userId,
+        public readonly Quiz $quiz,
+        public readonly int $userId,
         public readonly string $status, // ready | failed
     ) {}
 
     public function broadcastOn(): array
     {
         return [
-            new PrivateChannel('App.Models.User.' . $this->userId),
+            new PrivateChannel('App.Models.User.'.$this->userId),
         ];
     }
 
@@ -36,9 +36,9 @@ final class QuizGenerationCompleted implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'quiz_id'     => $this->quiz->id,
+            'quiz_id' => $this->quiz->id,
             'document_id' => $this->quiz->document_id,
-            'status'      => $this->status,
+            'status' => $this->status,
         ];
     }
 }

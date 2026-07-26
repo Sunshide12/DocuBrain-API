@@ -26,36 +26,42 @@ $this->mock(\App\Services\Contracts\AnswerGeneratorInterface::class, function ($
   2. It returns the correct `responseType` (e.g. `'quiz'`).
   3. It returns the data structure the Frontend expects.
 
-## 2. The 3 Base Cases for Every Agent
-Every agent test must include these 3 mandatory scenarios:
-1. `test_handles_chat_intent`: pass a `$context` where `isChat()` is `true`. Verify the agent returns conversational text without running complex logic.
-2. `test_handles_missing_topic`: pass a `$context` where `isTopicMissing()` is `true`. Verify it returns the predefined friendly error message.
-3. `test_happy_path_executes_logic`: the real scenario (see section 1) using the mocked LLM.
+## 2. The 3 Base Cases for Every Tool
+Every tool test must include these 3 mandatory scenarios (call `$tool->execute($context)` directly with a hand-built `ToolContext` — no need to go through `OrchestratorAgent`/`OrchestratorRouter` unless the test is specifically about routing, see `OrchestratorAgentTest` for that):
+1. `test_handles_missing_topic`: pass a `ToolContext` whose `intent->isTopicMissing()` is `true`. Verify it returns the predefined friendly error message.
+2. `test_happy_path_executes_logic`: the real scenario (see section 1) using the mocked LLM.
+3. `test_handles_llm_failure_gracefully` (when relevant to the tool): mock `OpenRouterClient::chat` to throw — this is normally NOT caught inside the tool, it propagates up to `OrchestratorAgent`, which is what turns it into a friendly message. Test that boundary in `OrchestratorAgentTest`, not inside every tool test.
+
+Router-selection tests (which tool the LLM call picks) belong in `OrchestratorAgentTest`/`OrchestratorRouter` tests, not in individual tool tests — keep tool tests focused on "given this ToolContext, does execute() behave correctly."
 
 ## 3. Quality Evaluation (Live Prompt Testing)
-To test the agent's actual **intelligence and quality** (is the prompt well-designed, does it respect the output format, does the embedding retrieve good data), don't use PHPUnit — use **Laravel Tinker** to bypass the frontend and iterate fast.
+To test the tool's actual **intelligence and quality** (is the prompt well-designed, does it respect the output format, does the embedding retrieve good data), don't use PHPUnit — use **Laravel Tinker** to bypass the frontend and iterate fast.
 
 1. Open the console: `php artisan tinker`
 2. Run a real scenario to evaluate the LLM's response:
 ```php
-// 1. Get a real document from the DB
+// 1. Get a real document and conversation from the DB
 $doc = \App\Models\Document::first();
+$conversation = \App\Models\Conversation::where('document_id', $doc->id)->first();
 
 // 2. Build a fake context
-$context = new \App\DTOs\AgentContext(
+$context = new \App\DTOs\ToolContext(
     question: "Genera un quiz de 3 preguntas nivel difícil",
+    conversation: $conversation,
     document: $doc,
+    userId: $doc->user_id,
     intent: new \App\DTOs\ClassifiedIntent('generate_quiz', 'general', true, 0.9),
-    // ...
 );
 
-// 3. Run the real agent
-$agent = app(\App\Agents\QuizGeneratorAgent::class);
-$response = $agent->handle($context);
+// 3. Run the real tool
+$tool = app(\App\Agents\Tools\QuizGeneratorTool::class);
+$response = $tool->execute($context);
 
 // 4. Visually inspect the quality
 dump($response->answer);
 ```
+
+To evaluate the **router's** tool-selection quality specifically (not a single tool's output), call `app(\App\Services\OrchestratorRouter::class)->route($message, $history)` instead and inspect the returned `['tool' => ..., 'intent' => ..., 'topic' => ..., 'topic_type' => ...]` array. The router prompt template lives in the `orchestrator_prompts` DB table (`key = 'router'`), editable without a deploy.
 
 ## 4. Feedback Loop (Continuous Improvement)
 If step 3 reveals the agent responding poorly (e.g. returns text when JSON was expected, or is imprecise):

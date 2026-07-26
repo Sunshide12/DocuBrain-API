@@ -34,7 +34,7 @@ type Query {
         @throttle(name: "api")
         @field(resolver: "App\\GraphQL\\Queries\\UserStats")
 
-    "Returns the list of agents available to start a conversation with."
+    "Returns the list of tools the orchestrator can route conversation turns to."
     availableAgents: [AgentInfo!]!
         @guard(with: ["sanctum"])
         @field(resolver: "App\\GraphQL\\Queries\\AvailableAgents")
@@ -44,11 +44,6 @@ type Query {
         @guard(with: ["sanctum"])
         @throttle(name: "api")
         @field(resolver: "App\\GraphQL\\Queries\\DocumentQuizzes")
-
-    "Suggests the most suitable agent for a given document based on content analysis."
-    suggestAgent(document_id: ID!): AgentSuggestion!
-        @guard(with: ["sanctum"])
-        @field(resolver: "App\\GraphQL\\Queries\\SuggestAgent")
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -73,12 +68,12 @@ type Mutation {
 
 
     "Create a new conversation. If document_id is null, it's a library-wide search."
-    createConversation(document_id: ID, title: String, agent_type: String): Conversation!
+    createConversation(document_id: ID, title: String): Conversation!
         @guard(with: ["sanctum"])
         @throttle(name: "api")
         @field(resolver: "App\\GraphQL\\Mutations\\CreateConversation")
 
-    "Send a message to a conversation."
+    "Send a message to a conversation. The orchestrator routes it to the right tool and requires a document to be attached."
     sendMessage(conversation_id: ID!, content: String!): Message!
         @guard(with: ["sanctum"])
         @throttle(name: "api")
@@ -89,11 +84,6 @@ type Mutation {
         @guard(with: ["sanctum"])
         @throttle(name: "api")
         @field(resolver: "App\\GraphQL\\Mutations\\DeleteConversation")
-
-    "Switch the agent type of an existing conversation."
-    switchAgentType(conversation_id: ID!, agent_type: String!): Conversation!
-        @guard(with: ["sanctum"])
-        @field(resolver: "App\\GraphQL\\Mutations\\SwitchAgentType")
 
     "Evaluates a user's free-text answer to an open-ended quiz question via the LLM. Stateless — does not persist the answer."
     reviewOpenEndedAnswer(question_id: ID!, user_answer: String!): OpenEndedReview!
@@ -248,23 +238,18 @@ type Message {
     source_chunks: [SourceChunk!] @rename(attribute: "source_chunk_ids")
     response_type: String
     metadata: String
+    agent_key: String
     prompt_tokens: Int
     completion_tokens: Int
     created_at: DateTime!
     updated_at: DateTime!
 }
 
-"Describes an agent available for conversations."
+"Describes a tool the orchestrator can route conversation turns to."
 type AgentInfo {
     key: String!
     name: String!
     description: String!
-}
-
-"Represents an agent recommendation for a document."
-type AgentSuggestion {
-    agent_type: String!
-    confidence: Float!
 }
 
 "A quiz auto-generated from a document."

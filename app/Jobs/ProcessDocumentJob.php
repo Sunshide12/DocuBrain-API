@@ -15,6 +15,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Pgvector\Laravel\Vector;
@@ -24,7 +25,9 @@ final class ProcessDocumentJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
+
     public int $backoff = 10;
+
     public int $timeout = 300;
 
     public function __construct(
@@ -48,10 +51,10 @@ final class ProcessDocumentJob implements ShouldQueue
             // Paso 2 — Chunking
             $this->updateProgress('chunking', 'Splitting text into chunks…', 40);
             $chunks = $this->chunkTextByPage($pages, 375, 37);
-            
+
             foreach ($chunks as $chunk) {
                 if (str_word_count($chunk['content']) > 6000) {
-                    Log::warning("Chunk excepcionalmente largo detectado", ['document_id' => $this->document->id]);
+                    Log::warning('Chunk excepcionalmente largo detectado', ['document_id' => $this->document->id]);
                 }
             }
 
@@ -61,14 +64,14 @@ final class ProcessDocumentJob implements ShouldQueue
                 array_column($chunks, 'content')
             );
 
-            $rows = array_map(function($chunk, $vector) {
+            $rows = array_map(function ($chunk, $vector) {
                 return [
                     'document_id' => $this->document->id,
                     'chunk_index' => $chunk['index'],
-                    'content'     => $chunk['content'],
+                    'content' => $chunk['content'],
                     'token_count' => $chunk['word_count'],
                     'page_number' => $chunk['page_number'],
-                    'embedding'   => (new Vector($vector))->__toString(),
+                    'embedding' => (new Vector($vector))->__toString(),
                 ];
             }, $chunks, $vectors);
 
@@ -82,15 +85,15 @@ final class ProcessDocumentJob implements ShouldQueue
             Log::info('ProcessDocumentJob completed', ['document_id' => $this->document->id]);
         } catch (\Throwable $e) {
             $this->document->update([
-                'status'        => 'failed',
+                'status' => 'failed',
                 'error_message' => $e->getMessage(),
             ]);
 
-            $this->updateProgress('failed', 'Processing failed: ' . $e->getMessage(), 0);
+            $this->updateProgress('failed', 'Processing failed: '.$e->getMessage(), 0);
 
             Log::error('ProcessDocumentJob failed', [
                 'document_id' => $this->document->id,
-                'error'       => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
 
             throw $e;
@@ -102,7 +105,7 @@ final class ProcessDocumentJob implements ShouldQueue
         Log::info("Document {$this->document->id} is now in step: {$status}");
         $this->document->update(['status' => $status]);
 
-        \Illuminate\Support\Facades\Cache::increment("documents.user.{$this->document->user_id}.version");
+        Cache::increment("documents.user.{$this->document->user_id}.version");
 
         try {
             DocumentProgressUpdated::dispatch(
@@ -113,7 +116,7 @@ final class ProcessDocumentJob implements ShouldQueue
                 $progress
             );
         } catch (\Throwable $e) {
-            Log::error("Failed to broadcast: " . $e->getMessage());
+            Log::error('Failed to broadcast: '.$e->getMessage());
         }
     }
 
@@ -125,10 +128,12 @@ final class ProcessDocumentJob implements ShouldQueue
         foreach ($pages as $pageNumber => $text) {
             // Split text keeping spaces and newlines
             $tokens = preg_split('/(\s+)/', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
-            
+
             $allWordsAndSpaces = [];
             foreach ($tokens as $token) {
-                if ($token === '') continue;
+                if ($token === '') {
+                    continue;
+                }
                 $isSpace = preg_match('/^\s+$/', $token) === 1;
                 $allWordsAndSpaces[] = ['text' => $token, 'is_space' => $isSpace];
             }
@@ -142,14 +147,14 @@ final class ProcessDocumentJob implements ShouldQueue
                 while ($i < count($allWordsAndSpaces) && $wordsInThisChunk < $wordsPerChunk) {
                     $item = $allWordsAndSpaces[$i];
                     $chunkText .= $item['text'];
-                    if (!$item['is_space']) {
+                    if (! $item['is_space']) {
                         $wordsInThisChunk++;
                     }
                     $i++;
                 }
-                
+
                 $chunkContent = trim($chunkText);
-                if (!empty($chunkContent)) {
+                if (! empty($chunkContent)) {
                     $chunks[] = [
                         'index' => $chunkIndex++,
                         'page_number' => $pageNumber,
@@ -162,7 +167,7 @@ final class ProcessDocumentJob implements ShouldQueue
                     $overlapCount = 0;
                     $i--; // Step back to last added item
                     while ($i > $chunkStartIdx && $overlapCount < $overlapWords) {
-                        if (!$allWordsAndSpaces[$i]['is_space']) {
+                        if (! $allWordsAndSpaces[$i]['is_space']) {
                             $overlapCount++;
                         }
                         if ($overlapCount < $overlapWords) {

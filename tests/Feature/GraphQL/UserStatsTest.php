@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 class UserStatsTest extends TestCase
 {
-    use RefreshDatabase, MakesGraphQLRequests;
+    use MakesGraphQLRequests, RefreshDatabase;
 
     public function test_user_can_query_own_stats()
     {

@@ -23,7 +23,6 @@ use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
 final class UserStats
 {
     /**
-     * @param  null  $root
      * @param  array{}  $args  No arguments for this query
      */
     public function __invoke(null $root, array $args, GraphQLContext $context): array

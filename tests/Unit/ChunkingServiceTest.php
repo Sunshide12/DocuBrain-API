@@ -11,7 +11,7 @@ class ChunkingServiceTest extends TestCase
 {
     private function invokeChunkTextByPage(array $pages, int $wordsPerChunk, int $overlapWords): array
     {
-        $document = new Document();
+        $document = new Document;
         $job = new ProcessDocumentJob($document);
 
         $reflection = new ReflectionClass(ProcessDocumentJob::class);
@@ -24,8 +24,8 @@ class ChunkingServiceTest extends TestCase
     public function test_text_is_split_into_correct_number_of_chunks()
     {
         // Generate a text with 1000 words
-        $words = array_map(fn($i) => "word{$i}", range(1, 1000));
-        $text = implode(" ", $words);
+        $words = array_map(fn ($i) => "word{$i}", range(1, 1000));
+        $text = implode(' ', $words);
 
         $chunks = $this->invokeChunkTextByPage([1 => $text], 375, 37);
 
@@ -42,8 +42,8 @@ class ChunkingServiceTest extends TestCase
 
     public function test_chunks_have_correct_overlap()
     {
-        $words = array_map(fn($i) => "word{$i}", range(1, 500));
-        $text = implode(" ", $words);
+        $words = array_map(fn ($i) => "word{$i}", range(1, 500));
+        $text = implode(' ', $words);
 
         $chunks = $this->invokeChunkTextByPage([1 => $text], 375, 37);
 

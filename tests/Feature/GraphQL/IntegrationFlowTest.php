@@ -3,6 +3,8 @@
 namespace Tests\Feature\GraphQL;
 
 use App\Models\Document;
+use App\Services\Contracts\EmbeddingProvider;
+use App\Services\Contracts\TextExtractor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -11,8 +13,8 @@ use Tests\TestCase;
 
 class IntegrationFlowTest extends TestCase
 {
-    use RefreshDatabase;
     use MakesGraphQLRequests;
+    use RefreshDatabase;
 
     /**
      * Test de integración: login -> upload -> documento aparece en lista con status ready.
@@ -21,15 +23,15 @@ class IntegrationFlowTest extends TestCase
     public function test_user_can_register_upload_and_document_becomes_ready(): void
     {
         Storage::fake('local');
-        
+
         // Forzamos la cola a sync porque docker-compose inyecta QUEUE_CONNECTION=redis
         // y phpunit.xml a veces no logra sobreescribirlo a nivel de sistema.
         config(['queue.default' => 'sync']);
 
-        $this->mock(\App\Services\Contracts\TextExtractor::class, function ($mock) {
+        $this->mock(TextExtractor::class, function ($mock) {
             $mock->shouldReceive('extract')->andReturn([1 => 'Fake extracted text']);
         });
-        $this->mock(\App\Services\Contracts\EmbeddingProvider::class, function ($mock) {
+        $this->mock(EmbeddingProvider::class, function ($mock) {
             $mock->shouldReceive('embedBatch')->andReturn([array_fill(0, 1536, 0.1)]);
         });
 
@@ -52,7 +54,7 @@ class IntegrationFlowTest extends TestCase
                 'email' => 'integration@example.com',
                 'password' => 'password123',
                 'password_confirmation' => 'password123',
-            ]
+            ],
         ]);
 
         $token = $registerResponse->json('data.register.token');
@@ -68,7 +70,7 @@ class IntegrationFlowTest extends TestCase
 
         $uploadResponse = $this->postJson('/api/documents/upload', [
             'file' => $file,
-            'title' => 'Integration Document'
+            'title' => 'Integration Document',
         ]);
 
         $uploadResponse->assertStatus(201);
@@ -84,7 +86,7 @@ class IntegrationFlowTest extends TestCase
 
         // 3. Verificar que el documento existe y, dado que la cola es síncrona en testing, ya está en estado 'ready'.
         $document = Document::find($documentId);
-        
+
         $this->assertNotNull($document);
         $this->assertEquals('ready', $document->status);
 

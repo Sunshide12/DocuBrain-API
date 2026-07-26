@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\GraphQL\Queries;
 
 use App\Models\Document;
+use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
 
@@ -42,17 +43,15 @@ use Nuwave\Lighthouse\Support\Contracts\GraphQLContext;
 final class Documents
 {
     /**
-     * @param  null  $root
      * @param  array{first?: int, page?: int}  $args
      */
     public function __invoke(null $root, array $args, GraphQLContext $context): array
     {
-        /** @var \App\Models\User $user */
-        $user   = $context->user();
-        $first  = max(1, (int) ($args['first'] ?? 10));
-        $page   = max(1, (int) ($args['page'] ?? 1));
+        /** @var User $user */
+        $user = $context->user();
+        $first = max(1, (int) ($args['first'] ?? 10));
+        $page = max(1, (int) ($args['page'] ?? 1));
         $userId = $user->id;
-
 
         // Cache versioning strategy:
         // We read a per-user "version" counter from cache. The counter is stored
@@ -67,7 +66,7 @@ final class Documents
         //   • Incrementing a counter is O(1) and works identically on the array driver
         //     (tests), the Redis driver (Docker/production), and any other cache backend.
         //   • Old versioned keys just expire after their TTL — no explicit deletion needed.
-        $version  = (int) Cache::get("documents.user.{$userId}.version", 1);
+        $version = (int) Cache::get("documents.user.{$userId}.version", 1);
         $cacheKey = "documents.user.{$userId}.v{$version}.page.{$page}.per.{$first}";
 
         // IMPORTANT: We cache the final plain array, NOT the LengthAwarePaginator object.
@@ -75,8 +74,8 @@ final class Documents
         // second request because LengthAwarePaginator isn't loaded before PHP tries to
         // deserialize it. Caching a plain array of primitives has no such issue.
         return Cache::remember(
-            key:     $cacheKey,
-            ttl:     300,
+            key: $cacheKey,
+            ttl: 300,
             callback: function () use ($first, $page): array {
                 $paginator = Document::query()
                     ->latest()
@@ -85,7 +84,7 @@ final class Documents
                 // Convert Eloquent models to plain arrays so Redis can safely
                 // serialize/deserialize without needing model class definitions.
                 return [
-                    'data'          => array_map(
+                    'data' => array_map(
                         function (Document $doc) {
                             $arr = $doc->toArray();
                             if ($doc->created_at) {
@@ -94,15 +93,16 @@ final class Documents
                             if ($doc->updated_at) {
                                 $arr['updated_at'] = $doc->updated_at->format('Y-m-d H:i:s');
                             }
+
                             return $arr;
                         },
                         $paginator->items(),
                     ),
                     'paginatorInfo' => [
-                        'total'        => $paginator->total(),
-                        'perPage'      => $paginator->perPage(),
-                        'currentPage'  => $paginator->currentPage(),
-                        'lastPage'     => $paginator->lastPage(),
+                        'total' => $paginator->total(),
+                        'perPage' => $paginator->perPage(),
+                        'currentPage' => $paginator->currentPage(),
+                        'lastPage' => $paginator->lastPage(),
                         'hasMorePages' => $paginator->hasMorePages(),
                     ],
                 ];

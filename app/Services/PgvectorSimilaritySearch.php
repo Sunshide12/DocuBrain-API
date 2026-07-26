@@ -7,14 +7,6 @@ use Illuminate\Database\Eloquent\Collection;
 
 class PgvectorSimilaritySearch
 {
-    /**
-     * @param array $queryVector
-     * @param int $userId
-     * @param int|null $documentId
-     * @param float $threshold
-     * @param int $limit
-     * @return Collection
-     */
     public function search(array $queryVector, int $userId, ?int $documentId, float $threshold, int $limit = 5): Collection
     {
         // Fuerza bruta sin índice vectorial: para < 10K chunks el escaneo secuencial es suficiente.

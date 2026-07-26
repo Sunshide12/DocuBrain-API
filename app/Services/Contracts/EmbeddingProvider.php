@@ -5,13 +5,12 @@ namespace App\Services\Contracts;
 interface EmbeddingProvider
 {
     /**
-     * @param string $text
      * @return array<float>
      */
     public function embed(string $text): array;
 
     /**
-     * @param string[] $texts
+     * @param  string[]  $texts
      * @return array<int, array<float>>
      */
     public function embedBatch(array $texts): array;

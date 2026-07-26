@@ -17,8 +17,8 @@ final class InvalidateDocumentCacheOnCompletion
 {
     public function handle(DocumentProcessed $event): void
     {
-        $userId      = $event->document->user_id;
-        $versionKey  = "documents.user.{$userId}.version";
+        $userId = $event->document->user_id;
+        $versionKey = "documents.user.{$userId}.version";
 
         Cache::increment($versionKey);
     }

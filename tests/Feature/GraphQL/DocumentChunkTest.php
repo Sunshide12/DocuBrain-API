@@ -42,8 +42,8 @@ use Tests\TestCase;
  */
 class DocumentChunkTest extends TestCase
 {
-    use RefreshDatabase;
     use MakesGraphQLRequests;
+    use RefreshDatabase;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Tests funcionales
@@ -54,7 +54,7 @@ class DocumentChunkTest extends TestCase
      */
     public function test_chunks_can_be_queried_by_document(): void
     {
-        $user     = User::factory()->create();
+        $user = User::factory()->create();
         $document = Document::factory()->create(['user_id' => $user->id]);
 
         // Creamos 5 chunks con chunk_index secuencial
@@ -95,8 +95,8 @@ class DocumentChunkTest extends TestCase
      */
     public function test_user_cannot_see_chunks_of_another_users_document(): void
     {
-        $owner  = User::factory()->create();
-        $other  = User::factory()->create();
+        $owner = User::factory()->create();
+        $other = User::factory()->create();
 
         $document = Document::factory()->create(['user_id' => $owner->id]);
         DocumentChunk::factory(3)->create(['document_id' => $document->id]);
@@ -133,7 +133,7 @@ class DocumentChunkTest extends TestCase
      */
     public function test_chunks_pagination_and_ordering(): void
     {
-        $user     = User::factory()->create();
+        $user = User::factory()->create();
         $document = Document::factory()->create(['user_id' => $user->id]);
 
         // Creamos 15 chunks para probar paginación (page size = 5)
@@ -236,7 +236,7 @@ class DocumentChunkTest extends TestCase
         $this->assertLessThanOrEqual(
             6,
             $queryCount,
-            "Se ejecutaron {$queryCount} queries.\n" .
+            "Se ejecutaron {$queryCount} queries.\n".
             implode("\n", array_column($queries, 'query'))
         );
     }

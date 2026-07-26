@@ -2,20 +2,21 @@
 
 namespace App\GraphQL\Queries;
 
-use App\Agents\AgentRegistry;
+use App\Models\Tool;
 
 class AvailableAgents
 {
-    public function __construct(
-        private readonly AgentRegistry $registry,
-    ) {}
-
     public function __invoke($_, array $args): array
     {
-        return array_values(array_map(fn($agent) => [
-            'key'         => $agent->key(),
-            'name'        => $agent->name(),
-            'description' => $agent->description(),
-        ], $this->registry->all()));
+        return Tool::query()
+            ->where('is_enabled', true)
+            ->orderBy('sort_order')
+            ->get(['key', 'name', 'description'])
+            ->map(fn (Tool $tool) => [
+                'key' => $tool->key,
+                'name' => $tool->name,
+                'description' => $tool->description,
+            ])
+            ->all();
     }
 }

@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Feature\GraphQL;
+namespace Tests\Feature\Jobs;
 
 use App\Jobs\GenerateAutoQuizJob;
 use App\Models\Document;
@@ -17,30 +17,29 @@ class GenerateAutoQuizJobTest extends TestCase
 
     public function test_job_creates_quiz_with_questions_from_chunks(): void
     {
-        $user     = User::factory()->create();
+        $user = User::factory()->create();
         $document = Document::factory()->create([
             'user_id' => $user->id,
-            'status'  => 'ready',
-            'title'   => 'Calculus Basics',
+            'status' => 'ready',
+            'title' => 'Calculus Basics',
         ]);
 
-        // Seed two chunks so the job has content to work with
         DocumentChunk::insert([
             [
                 'document_id' => $document->id,
                 'chunk_index' => 0,
                 'page_number' => 1,
-                'content'     => 'The derivative of a function measures the rate of change. For f(x) = x^2, the derivative f\'(x) = 2x.',
+                'content' => 'The derivative of a function measures the rate of change. For f(x) = x^2, the derivative f\'(x) = 2x.',
                 'token_count' => 20,
-                'created_at'  => now(),
+                'created_at' => now(),
             ],
             [
                 'document_id' => $document->id,
                 'chunk_index' => 1,
                 'page_number' => 1,
-                'content'     => 'The integral is the inverse of the derivative. The integral of 2x is x^2 + C.',
+                'content' => 'The integral is the inverse of the derivative. The integral of 2x is x^2 + C.',
                 'token_count' => 17,
-                'created_at'  => now(),
+                'created_at' => now(),
             ],
         ]);
 
@@ -50,17 +49,17 @@ class GenerateAutoQuizJobTest extends TestCase
                     'message' => [
                         'content' => json_encode([
                             [
-                                'type'           => 'multiple_choice',
-                                'question'       => 'What is the derivative of x^2?',
-                                'options'        => ['A) x', 'B) 2x', 'C) x^2', 'D) 2'],
+                                'type' => 'multiple_choice',
+                                'question' => 'What is the derivative of x^2?',
+                                'options' => ['A) x', 'B) 2x', 'C) x^2', 'D) 2'],
                                 'correct_answer' => 'B',
-                                'explanation'    => 'The power rule gives f\'(x) = 2x.',
+                                'explanation' => 'The power rule gives f\'(x) = 2x.',
                             ],
                             [
-                                'type'           => 'flashcard',
-                                'question'       => 'Define: integral',
+                                'type' => 'flashcard',
+                                'question' => 'Define: integral',
                                 'correct_answer' => 'The inverse operation of the derivative.',
-                                'explanation'    => 'Stated in the text.',
+                                'explanation' => 'Stated in the text.',
                             ],
                         ]),
                     ],
@@ -75,31 +74,25 @@ class GenerateAutoQuizJobTest extends TestCase
         $this->assertNotNull($quiz);
         $this->assertEquals('ready', $quiz->status);
         $this->assertEquals(2, $quiz->questions()->count());
-        $this->assertDatabaseHas('quiz_questions', [
-            'quiz_id' => $quiz->id,
-            'type'    => 'multiple_choice',
-        ]);
-        $this->assertDatabaseHas('quiz_questions', [
-            'quiz_id' => $quiz->id,
-            'type'    => 'flashcard',
-        ]);
+        $this->assertDatabaseHas('quiz_questions', ['quiz_id' => $quiz->id, 'type' => 'multiple_choice']);
+        $this->assertDatabaseHas('quiz_questions', ['quiz_id' => $quiz->id, 'type' => 'flashcard']);
     }
 
     public function test_job_marks_quiz_as_failed_when_llm_returns_malformed_json(): void
     {
-        $user     = User::factory()->create();
+        $user = User::factory()->create();
         $document = Document::factory()->create([
             'user_id' => $user->id,
-            'status'  => 'ready',
+            'status' => 'ready',
         ]);
 
         DocumentChunk::insert([[
             'document_id' => $document->id,
             'chunk_index' => 0,
             'page_number' => 1,
-            'content'     => 'Some document content here.',
+            'content' => 'Some document content here.',
             'token_count' => 5,
-            'created_at'  => now(),
+            'created_at' => now(),
         ]]);
 
         Http::fake([

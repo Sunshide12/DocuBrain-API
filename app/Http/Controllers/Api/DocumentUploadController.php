@@ -8,6 +8,7 @@ use App\Events\DocumentUploaded;
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -36,21 +37,21 @@ class DocumentUploadController extends Controller
         // Sanitize filename for storage
         $title = $request->input('title') ?? $file->getClientOriginalName();
         $originalName = $file->getClientOriginalName();
-        $sanitizedName = Str::slug(pathinfo($title, PATHINFO_FILENAME)) . '.pdf';
+        $sanitizedName = Str::slug(pathinfo($title, PATHINFO_FILENAME)).'.pdf';
 
-        $path = $file->storeAs('documents', uniqid('', true) . '_' . $sanitizedName);
+        $path = $file->storeAs('documents', uniqid('', true).'_'.$sanitizedName);
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $document = Document::create([
-            'user_id'       => $user->id,
-            'title'         => $title,
+            'user_id' => $user->id,
+            'title' => $title,
             'original_name' => $originalName,
-            'file_path'     => $path,
-            'mime_type'     => $file->getClientMimeType(),
-            'size'          => $file->getSize(),
-            'status'        => 'pending',
+            'file_path' => $path,
+            'mime_type' => $file->getClientMimeType(),
+            'size' => $file->getSize(),
+            'status' => 'pending',
         ]);
 
         // 1. Dispatch the heavy processing to the Redis queue (async).

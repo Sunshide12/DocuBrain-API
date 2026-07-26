@@ -1,10 +1,13 @@
 <?php
 
+use App\Providers\AgentServiceProvider;
 use App\Providers\AppServiceProvider;
+use Illuminate\Broadcasting\BroadcastServiceProvider;
+use Nuwave\Lighthouse\Subscriptions\SubscriptionServiceProvider;
 
 return [
     AppServiceProvider::class,
-    App\Providers\AgentServiceProvider::class,
-    Illuminate\Broadcasting\BroadcastServiceProvider::class,
-    Nuwave\Lighthouse\Subscriptions\SubscriptionServiceProvider::class,
+    AgentServiceProvider::class,
+    BroadcastServiceProvider::class,
+    SubscriptionServiceProvider::class,
 ];

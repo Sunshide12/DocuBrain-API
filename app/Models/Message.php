@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use Database\Factories\MessageFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Message extends Model
 {
-    /** @use HasFactory<\Database\Factories\MessageFactory> */
+    /** @use HasFactory<MessageFactory> */
     use HasFactory;
 
     protected $fillable = [
@@ -18,6 +19,7 @@ class Message extends Model
         'source_chunk_ids',
         'response_type',
         'metadata',
+        'agent_key',
         'prompt_tokens',
         'completion_tokens',
     ];
