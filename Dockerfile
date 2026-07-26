@@ -38,6 +38,9 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 WORKDIR /var/www/html
 
+# Copiar todo el código de la aplicación (Crítico para Coolify/Producción)
+COPY . /var/www/html
+
 EXPOSE 8000
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
