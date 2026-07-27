@@ -128,7 +128,7 @@ class OrchestratorAgentTest extends TestCase
             $mock->shouldReceive('embed')->andReturn([0.1, 0.2]);
         });
         $this->mock(PgvectorSimilaritySearch::class, function (MockInterface $mock) {
-            $mock->shouldReceive('search')->andReturn(new Collection());
+            $mock->shouldReceive('search')->andReturn(new Collection);
         });
 
         $orchestrator = $this->app->make(OrchestratorAgent::class);

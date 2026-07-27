@@ -31,8 +31,18 @@ class StructuralChunkResolver
     /** Words that mean "from the end" rather than "from the start". */
     private const LAST_WORDS = ['último', 'ultimo', 'última', 'ultima', 'last'];
 
-    /** Heading markers that introduce a new numbered item (Spanish + English). */
-    private const MARKER_PATTERN = '/\b(problema|ejercicio|punto|secci[oó]n|cap[ií]tulo|apartado|problem|exercise|section|chapter|item)\s+([ivxlcdm]+|\d+(?:\.\d+)*)/iu';
+    /**
+     * Heading markers that introduce a new numbered item (Spanish + English).
+     *
+     * Anchored to the start of a line: inside a legal text "del artículo 13" is a
+     * cross-reference, not a new section, and treating it as a boundary truncated
+     * the article being quoted after a couple of sentences.
+     *
+     * "artículo" matters as much as "capítulo": in legal texts it is THE numbering
+     * unit, and "¿qué dice el artículo 11?" must land on article 11 by position, not
+     * on whichever passage happens to talk about the same subject.
+     */
+    private const MARKER_PATTERN = '/(?:^|\n)[ \t]*(art[ií]culo|article|problema|ejercicio|punto|secci[oó]n|cap[ií]tulo|apartado|problem|exercise|section|chapter|item)\s+([ivxlcdm]+|\d+(?:\.\d+)*)/iu';
 
     /** Hard cap so a pathological document can't blow up memory/token usage; beyond this we bail out to vector search. */
     private const MAX_CHUNKS_TO_SCAN = 500;
@@ -118,30 +128,56 @@ class StructuralChunkResolver
         $index = match ($type) {
             'last' => count($offsets) - 1,
             'position' => $value - 1,
-            'number' => $this->findByNumber($numbers, (string) $value),
+            'number' => $this->findByNumber($numbers, $offsets, (string) $value, $fullText),
         };
 
         if ($index === null || ! isset($offsets[$index])) {
             return null;
         }
 
+        // PREG_OFFSET_CAPTURE reports BYTE offsets, so the slice must be byte-based
+        // too. Using mb_substr here shifted the start by one position per accented
+        // character seen earlier in the document, which on a Spanish legal text meant
+        // the extract began mid-word ("ción al afectado" instead of "Artículo 11.").
+        // Both bounds sit on match boundaries, so the byte slice is still valid UTF-8.
         $start = $offsets[$index][1];
-        $end = $offsets[$index + 1][1] ?? min($start + self::MAX_ITEM_LENGTH, mb_strlen($fullText));
+        $end = $offsets[$index + 1][1] ?? min($start + self::MAX_ITEM_LENGTH, strlen($fullText));
 
-        return trim(mb_substr($fullText, $start, $end - $start));
+        return trim(substr($fullText, $start, $end - $start));
     }
 
     /**
+     * Finds the occurrence of a numbered marker that actually holds the content.
+     *
+     * A number usually appears twice: once in the table of contents and once as the
+     * real heading. Taking the first match returned the index line ("Artículo 11.
+     * Transparencia . . . . 18"), so the user got dot leaders instead of the article.
+     * The index entry ends where the next entry starts — a few dozen bytes — while
+     * the real section runs until the next heading, so the widest span is the body.
+     * This needs no special-casing of tables of contents.
+     *
      * @param  array<int, array{0: string, 1: int}>  $numbers  Offset-captured number group from MARKER_PATTERN.
+     * @param  array<int, array{0: string, 1: int}>  $offsets  Offset-captured full matches.
      */
-    private function findByNumber(array $numbers, string $needle): ?int
+    private function findByNumber(array $numbers, array $offsets, string $needle, string $fullText): ?int
     {
+        $best = null;
+        $widestSpan = -1;
+
         foreach ($numbers as $i => $capture) {
-            if ($capture[0] === $needle) {
-                return $i;
+            if ($capture[0] !== $needle) {
+                continue;
+            }
+
+            $start = $offsets[$i][1];
+            $span = ($offsets[$i + 1][1] ?? strlen($fullText)) - $start;
+
+            if ($span > $widestSpan) {
+                $widestSpan = $span;
+                $best = $i;
             }
         }
 
-        return null;
+        return $best;
     }
 }

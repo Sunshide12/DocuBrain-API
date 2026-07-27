@@ -23,12 +23,21 @@ class SendMessage
             throw new FriendlyException('Seleccioná un documento para chatear.');
         }
 
+        // Guard before persisting: an all-whitespace message would otherwise be
+        // stored and sent to the orchestrator, which bills an LLM call to answer
+        // nothing and leaves a blank turn in the thread.
+        $content = trim($args['content']);
+
+        if ($content === '') {
+            throw new FriendlyException('Escribí una pregunta para poder ayudarte.');
+        }
+
         $conversation->messages()->create([
             'role' => 'user',
-            'content' => $args['content'],
+            'content' => $content,
         ]);
 
-        $result = $this->orchestrator->handle($args['content'], $conversation, $user->id);
+        $result = $this->orchestrator->handle($content, $conversation, $user->id);
 
         return $conversation->messages()->create([
             'role' => 'assistant',

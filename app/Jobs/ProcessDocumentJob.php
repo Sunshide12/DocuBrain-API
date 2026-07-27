@@ -24,6 +24,9 @@ final class ProcessDocumentJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    /** Below this the chunk is a page remnant, not answerable content. */
+    private const MIN_CHUNK_WORDS = 60;
+
     public int $tries = 3;
 
     public int $backoff = 10;
@@ -50,7 +53,9 @@ final class ProcessDocumentJob implements ShouldQueue
 
             // Paso 2 — Chunking
             $this->updateProgress('chunking', 'Splitting text into chunks…', 40);
-            $chunks = $this->chunkTextByPage($pages, 375, 37);
+            $chunks = $this->dropLowInformationChunks(
+                $this->chunkTextByPage($pages, 375, 37)
+            );
 
             foreach ($chunks as $chunk) {
                 if (str_word_count($chunk['content']) > 6000) {
@@ -81,6 +86,12 @@ final class ProcessDocumentJob implements ShouldQueue
             $this->document->update(['status' => 'ready']);
             DocumentProcessed::dispatch($this->document);
             $this->updateProgress('ready', 'Document is ready.', 100);
+
+            // El contenido matemático se extrae aparte (conserva el layout por página,
+            // que MathSolverTool necesita para citar el problema original). Va después
+            // de marcar 'ready' y en su propio job para no retrasar la disponibilidad
+            // del documento ni tumbar el procesado si la extracción falla.
+            ProcessMathExtractionJob::dispatch($this->document);
 
             Log::info('ProcessDocumentJob completed', ['document_id' => $this->document->id]);
         } catch (\Throwable $e) {
@@ -118,6 +129,55 @@ final class ProcessDocumentJob implements ShouldQueue
         } catch (\Throwable $e) {
             Log::error('Failed to broadcast: '.$e->getMessage());
         }
+    }
+
+    /**
+     * Drops page remnants that carry no answerable content.
+     *
+     * The chunker targets 375 words, so a chunk an order of magnitude smaller is
+     * what was left over from a page that is mostly a figure or a diagram — e.g.
+     * the attention heatmaps in an ML paper extract as ~45 words of "<pad> <EOS>"
+     * token soup. Those fragments then win retrieval: cosine similarity is inflated
+     * on very short texts, so they outrank the real 300-word prose chunks and the
+     * model is asked to answer from noise.
+     *
+     * Filtering here rather than at query time also avoids paying to embed them.
+     * The guard never empties a document: if every chunk is short (a genuinely tiny
+     * PDF), they are all kept.
+     *
+     * @param  array<int, array{index: int, content: string, word_count: int, page_number: int|null}>  $chunks
+     * @return array<int, array{index: int, content: string, word_count: int, page_number: int|null}>
+     */
+    private function dropLowInformationChunks(array $chunks): array
+    {
+        // Count whitespace-separated words rather than trusting word_count: the
+        // chunker's counter splits on punctuation, so token soup like "<pad> <EOS> ."
+        // inflates to more than twice its real length and slips past the floor.
+        $kept = array_values(array_filter(
+            $chunks,
+            fn (array $chunk) => count(preg_split('/\s+/', trim($chunk['content']), -1, PREG_SPLIT_NO_EMPTY) ?: []) >= self::MIN_CHUNK_WORDS
+        ));
+
+        if ($kept === []) {
+            return $chunks;
+        }
+
+        $dropped = count($chunks) - count($kept);
+
+        if ($dropped > 0) {
+            Log::info('Chunks descartados por bajo contenido', [
+                'document_id' => $this->document->id,
+                'dropped' => $dropped,
+                'kept' => count($kept),
+            ]);
+        }
+
+        // chunk_index must stay contiguous: it is the document's reading order.
+        foreach ($kept as $position => &$chunk) {
+            $chunk['index'] = $position;
+        }
+
+        return $kept;
     }
 
     private function chunkTextByPage(array $pages, int $wordsPerChunk, int $overlapWords): array

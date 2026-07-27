@@ -15,6 +15,15 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
+
+        // GraphQL declares its own nullability. Letting Laravel rewrite ""  to null
+        // turns a whitespace-only message into a null for a String! argument, and the
+        // user gets a raw schema error ("Variable $m of non-null type String! must not
+        // be null") instead of a normal reply. Keep the empty string and let the
+        // resolver's validation produce a human message.
+        $middleware->convertEmptyStringsToNull(except: [
+            fn (Request $request) => $request->is('graphql'),
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

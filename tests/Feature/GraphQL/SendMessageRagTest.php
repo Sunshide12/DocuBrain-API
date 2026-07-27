@@ -59,7 +59,7 @@ class SendMessageRagTest extends TestCase
         });
 
         $this->mock(PgvectorSimilaritySearch::class, function (MockInterface $mock) use ($chunk1, $chunk2) {
-            $mock->shouldReceive('search')->andReturn(
+            $mock->shouldReceive('search', 'searchAdaptive')->andReturn(
                 new Collection([$chunk1, $chunk2])
             );
         });
@@ -92,13 +92,14 @@ class SendMessageRagTest extends TestCase
                 'sendMessage' => [
                     'role' => 'assistant',
                     'content' => 'Esta es la respuesta simulada.',
-                    'source_chunks' => [
-                        ['id' => $chunk1->id, 'page_number' => 1],
-                        ['id' => $chunk2->id, 'page_number' => 2],
-                    ],
                 ],
             ],
         ]);
+
+        // Sources are a set, not a ranking: a generic question also pulls the
+        // document's opening chunks in, so assert membership rather than order.
+        $returnedIds = array_column($response->json('data.sendMessage.source_chunks'), 'id');
+        $this->assertEqualsCanonicalizing([$chunk1->id, $chunk2->id], $returnedIds);
     }
 
     public function test_send_message_returns_no_context_response_when_no_similar_chunks()
@@ -117,9 +118,15 @@ class SendMessageRagTest extends TestCase
         });
 
         $this->mock(PgvectorSimilaritySearch::class, function (MockInterface $mock) {
-            $mock->shouldReceive('search')->andReturn(
+            $mock->shouldReceive('search', 'searchAdaptive')->andReturn(
                 new Collection([])
             );
+        });
+
+        // Finding no passage is not a dead end: the tool still answers, telling the
+        // user it is not in the document. What it must never do is cite a source.
+        $this->mock(OpenRouterClient::class, function (MockInterface $mock) {
+            $mock->shouldReceive('chat')->andReturn('Eso no aparece en el documento.');
         });
 
         $response = $this->actingAs($user)->postGraphQL([
@@ -144,7 +151,7 @@ class SendMessageRagTest extends TestCase
             'data' => [
                 'sendMessage' => [
                     'role' => 'assistant',
-                    'content' => 'No tengo información suficiente para responder esa pregunta con los documentos disponibles.',
+                    'content' => 'Eso no aparece en el documento.',
                     'source_chunks' => [],
                 ],
             ],
@@ -174,6 +181,17 @@ class SendMessageRagTest extends TestCase
         });
 
         // Real PgvectorSimilaritySearch: scopes to user2's documents, finds 0 chunks.
+        // Capture the prompt: the point of this test is that user 1's chunk never
+        // reaches the model, which is stronger than asserting the reply's wording.
+        $capturedPrompt = null;
+        $this->mock(OpenRouterClient::class, function (MockInterface $mock) use (&$capturedPrompt) {
+            $mock->shouldReceive('chat')->andReturnUsing(function (array $messages) use (&$capturedPrompt) {
+                $capturedPrompt = $messages[0]['content'];
+
+                return 'Eso no aparece en el documento.';
+            });
+        });
+
         $response = $this->actingAs($user2)->postGraphQL([
             'query' => '
                 mutation($conversation_id: ID!, $content: String!) {
@@ -191,9 +209,12 @@ class SendMessageRagTest extends TestCase
         $response->assertJson([
             'data' => [
                 'sendMessage' => [
-                    'content' => 'No tengo información suficiente para responder esa pregunta con los documentos disponibles.',
+                    'content' => 'Eso no aparece en el documento.',
                 ],
             ],
         ]);
+
+        $this->assertNotNull($capturedPrompt);
+        $this->assertStringNotContainsString('Secret info from user 1', $capturedPrompt);
     }
 }

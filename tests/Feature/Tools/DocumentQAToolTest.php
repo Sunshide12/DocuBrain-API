@@ -44,12 +44,28 @@ class DocumentQAToolTest extends TestCase
         );
     }
 
-    public function test_returns_friendly_message_without_calling_the_llm_when_topic_is_missing(): void
+    public function test_answers_off_topic_questions_instead_of_refusing_when_topic_is_missing(): void
     {
         [$user, $document, $conversation] = $this->makeConversation();
 
-        $this->mock(OpenRouterClient::class, function (MockInterface $mock) {
-            $mock->shouldReceive('chat')->never();
+        // A topic the document does not cover is the normal off-topic case: the tool
+        // must still answer, telling the model there is no related passage so it can
+        // say so and then help from general knowledge.
+        $capturedPrompt = null;
+        $this->mock(OpenRouterClient::class, function (MockInterface $mock) use (&$capturedPrompt) {
+            $mock->shouldReceive('chat')->once()->andReturnUsing(function (array $messages) use (&$capturedPrompt) {
+                $capturedPrompt = $messages[0]['content'];
+
+                return 'Eso no está en el documento, pero la fotosíntesis es…';
+            });
+        });
+
+        $this->mock(EmbeddingProvider::class, function (MockInterface $mock) {
+            $mock->shouldReceive('embed')->once()->andReturn([0.1, 0.2]);
+        });
+
+        $this->mock(PgvectorSimilaritySearch::class, function (MockInterface $mock) {
+            $mock->shouldReceive('searchAdaptive')->once()->andReturn(new Collection([]));
         });
 
         $intent = new ClassifiedIntent(
@@ -69,6 +85,8 @@ class DocumentQAToolTest extends TestCase
         ));
 
         $this->assertStringContainsString('fotosíntesis', $response->answer);
+        $this->assertStringContainsString('no passage related', $capturedPrompt);
+        $this->assertSame([], $response->sourceChunks);
     }
 
     public function test_dedupes_and_truncates_chunks_before_prompting_the_llm(): void
@@ -81,7 +99,7 @@ class DocumentQAToolTest extends TestCase
         $chunks = new Collection([
             DocumentChunk::factory()->create(['document_id' => $document->id, 'page_number' => 1, 'content' => $duplicateContent]),
             // Same text after whitespace-normalization -> must be deduped.
-            DocumentChunk::factory()->create(['document_id' => $document->id, 'page_number' => 1, 'content' => "Este es el contenido del capítulo. con espacios raros"]),
+            DocumentChunk::factory()->create(['document_id' => $document->id, 'page_number' => 1, 'content' => 'Este es el contenido del capítulo. con espacios raros']),
             DocumentChunk::factory()->create(['document_id' => $document->id, 'page_number' => 2, 'content' => $longContent]),
         ]);
 
@@ -90,7 +108,7 @@ class DocumentQAToolTest extends TestCase
         });
 
         $this->mock(PgvectorSimilaritySearch::class, function (MockInterface $mock) use ($chunks) {
-            $mock->shouldReceive('search')->once()->andReturn($chunks);
+            $mock->shouldReceive('searchAdaptive')->once()->andReturn($chunks);
         });
 
         $capturedPrompt = null;
@@ -116,7 +134,10 @@ class DocumentQAToolTest extends TestCase
 
         $this->assertEquals('Respuesta de prueba.', $response->answer);
         $this->assertCount(2, $response->sourceChunks); // deduped from 3 to 2
-        $this->assertStringContainsString('Format the answer in Markdown', $capturedPrompt);
+        // Assert the prompt was assembled, without pinning the exact wording of the
+        // instructions (they get tuned; the structure is what this test is about).
+        $this->assertStringContainsString('## Rules', $capturedPrompt);
+        $this->assertStringContainsString('¿de qué trata el capítulo?', $capturedPrompt);
         $this->assertEquals(1, substr_count($capturedPrompt, 'Este es el contenido del capítulo'));
         $this->assertStringNotContainsString(str_repeat('a', 2500), $capturedPrompt);
         $this->assertStringContainsString(str_repeat('a', 2000).'…', $capturedPrompt);
@@ -135,7 +156,7 @@ class DocumentQAToolTest extends TestCase
         });
 
         $this->mock(PgvectorSimilaritySearch::class, function (MockInterface $mock) use ($chunk) {
-            $mock->shouldReceive('search')->once()->andReturn(new Collection([$chunk]));
+            $mock->shouldReceive('searchAdaptive')->once()->andReturn(new Collection([$chunk]));
         });
 
         $this->mock(OpenRouterClient::class, function (MockInterface $mock) {
