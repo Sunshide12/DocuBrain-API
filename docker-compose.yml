@@ -1,9 +1,13 @@
+# ============================================================
+# DocuBrain API — Production Docker Compose
+# ============================================================
+# 3 containers only: app (Laravel + Reverb + Queue), postgres, redis
+# ============================================================
+
 name: docubrain
 
 services:
-  # ─────────────────────────────────────────────────────────────────────────
-  # PostgreSQL 18 + pgvector
-  # ─────────────────────────────────────────────────────────────────────────
+  # ── PostgreSQL 16 + pgvector ─────────────────────────────
   postgres:
     build:
       context: ./docker/postgres
@@ -13,7 +17,7 @@ services:
     environment:
       POSTGRES_DB: ${DB_DATABASE:-docubrain}
       POSTGRES_USER: ${DB_USERNAME:-docubrain}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -23,14 +27,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - docubrain
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Redis 7 (alpine)
-  # ─────────────────────────────────────────────────────────────────────────
+  # ── Redis 7 ──────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: docubrain-redis
     restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
@@ -38,10 +43,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - docubrain
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Laravel 13 App — PHP 8.5
-  # ─────────────────────────────────────────────────────────────────────────
+  # ── App (Laravel + Reverb + Queue via Supervisor) ────────
   app:
     build:
       context: .
@@ -50,17 +55,17 @@ services:
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8000}:8000"
-    working_dir: /var/www/html
-    volumes:
-      - .:/var/www/html
+      - "${REVERB_SERVER_PORT:-8080}:8080"
     env_file: .env
     environment:
-      # Hostnames internos de Docker (sobreescriben el .env)
+      # Override hosts to use Docker internal DNS
       DB_HOST: postgres
+      DB_PORT: 5432
       REDIS_HOST: redis
-      REVERB_HOST: reverb
-      # Activa composer install + migrate en el entrypoint
-      RUN_SETUP: "true"
+      REDIS_PORT: 6379
+      REVERB_HOST: localhost
+      REVERB_SERVER_HOST: 0.0.0.0
+      REVERB_SERVER_PORT: 8080
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,65 +75,17 @@ services:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/up"]
       interval: 30s
       timeout: 10s
-      start_period: 120s
+      start_period: 90s
       retries: 3
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Laravel Reverb (WebSockets)
-  # ─────────────────────────────────────────────────────────────────────────
-  reverb:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: docubrain-reverb
-    restart: unless-stopped
-    ports:
-      - "${REVERB_SERVER_PORT:-8080}:8080"
-    working_dir: /var/www/html
-    volumes:
-      - .:/var/www/html
-    env_file: .env
-    environment:
-      DB_HOST: postgres
-      REDIS_HOST: redis
-      REVERB_SERVER_HOST: 0.0.0.0
-      REVERB_SERVER_PORT: 8080
-    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
-    depends_on:
-      app:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Laravel Queue Worker
-  # ─────────────────────────────────────────────────────────────────────────
-  queue:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: docubrain-queue
-    restart: unless-stopped
-    working_dir: /var/www/html
-    volumes:
-      - .:/var/www/html
-    env_file: .env
-    environment:
-      DB_HOST: postgres
-      REDIS_HOST: redis
-    command: ["php", "artisan", "queue:work", "--tries=3", "--sleep=3", "--timeout=300", "--max-time=3600"]
-    depends_on:
-      app:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    networks:
+      - docubrain
 
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
+
+networks:
+  docubrain:
+    driver: bridge
