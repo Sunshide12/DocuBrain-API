@@ -11,9 +11,16 @@ use App\Services\Contracts\EmbeddingProvider;
 use App\Services\Contracts\OpenRouterClient;
 use App\Services\PgvectorSimilaritySearch;
 use App\Services\StructuralChunkResolver;
+use Illuminate\Support\Facades\Cache;
 
 class DocumentQATool implements AgentTool
 {
+    /** Max characters kept per chunk before injecting it into the prompt. */
+    private const MAX_CHUNK_CHARS = 2000;
+
+    /** How long a document+question answer is cached before the LLM is called again. */
+    private const CACHE_TTL_SECONDS = 900;
+
     public function __construct(
         private readonly EmbeddingProvider $embeddingProvider,
         private readonly PgvectorSimilaritySearch $similaritySearch,
@@ -52,6 +59,21 @@ class DocumentQATool implements AgentTool
             );
         }
 
+        $documentId = $context->conversation->document_id;
+        $cacheKey = $documentId ? $this->cacheKey($documentId, $context->question) : null;
+
+        if ($cacheKey !== null) {
+            $cached = Cache::get($cacheKey);
+
+            if (is_array($cached)) {
+                return new ToolResponse(
+                    answer: $cached['answer'],
+                    agentKey: $this->key(),
+                    sourceChunks: $cached['source_chunks'] ?? [],
+                );
+            }
+        }
+
         $sourceChunks = [];
         $contextText = null;
 
@@ -83,8 +105,16 @@ class DocumentQATool implements AgentTool
                 );
             }
 
+            // Dedup near-identical chunks (common with overlapping page splits) and cap
+            // each chunk's length so the prompt doesn't carry redundant/oversized text.
+            $chunks = $chunks->unique(fn ($chunk) => md5(trim(preg_replace('/\s+/', ' ', $chunk->content))))->values();
+
             $contextText = implode("\n\n---\n\n", $chunks->map(function ($chunk) {
-                return 'Página '.($chunk->page_number ?? 'N/A').":\n".$chunk->content;
+                $content = mb_strlen($chunk->content) > self::MAX_CHUNK_CHARS
+                    ? mb_substr($chunk->content, 0, self::MAX_CHUNK_CHARS).'…'
+                    : $chunk->content;
+
+                return 'Página '.($chunk->page_number ?? 'N/A').":\n".$content;
             })->all());
 
             $sourceChunks = $chunks->map(fn ($chunk) => [
@@ -105,7 +135,8 @@ You are an intelligent and helpful AI assistant. Your primary objective is to an
 - Do not invent specific facts, numbers, or quotes that should come from the document.
 - Tell to the user the page number from where the information was extracted.
 - Write the answer in the same language as the user's question.
-
+- Format the answer in Markdown: use headings (##), bullet/numbered lists, **bold**
+  for key terms, and code blocks (```) for code or formulas when relevant.
 
 ## Context
 
@@ -120,10 +151,26 @@ EOT;
             ['role' => 'user', 'content' => $prompt],
         ], ['timeout' => 60]);
 
+        if ($cacheKey !== null) {
+            Cache::put($cacheKey, ['answer' => $answer, 'source_chunks' => $sourceChunks], self::CACHE_TTL_SECONDS);
+        }
+
         return new ToolResponse(
             answer: $answer,
             agentKey: $this->key(),
             sourceChunks: $sourceChunks,
         );
+    }
+
+    /**
+     * Cache key scoped to the document and the normalized question text, so that
+     * repeated/near-identical questions about the same document skip the embedding
+     * search and the LLM call entirely.
+     */
+    private function cacheKey(int $documentId, string $question): string
+    {
+        $normalized = mb_strtolower(trim(preg_replace('/\s+/', ' ', $question)));
+
+        return "docqa.answer.{$documentId}.".md5($normalized);
     }
 }

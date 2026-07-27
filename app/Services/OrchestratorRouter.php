@@ -18,32 +18,28 @@ use Illuminate\Support\Collection;
 class OrchestratorRouter
 {
     private const DEFAULT_PROMPT = <<<'PROMPT'
-You are the router for a document assistant. Read the user's message and the recent
-conversation history, then decide which single tool should handle it and what the
-user's intent is.
+Router for a document assistant. Given the message and recent history, pick ONE tool and classify intent/topic.
 
-## Available tools
+## Tools
 {tools}
 
-## Recent conversation history
+## History
 {history}
 
-## Current user message
+## Message
 {message}
 
 ## Rules
-- Pick exactly ONE tool key from the list above.
-- If the message is a greeting, small talk, or asks what you can do, choose "greetings".
-- If the message is genuinely ambiguous and no tool clearly matches, choose "clarification".
-- Do NOT force a match — prefer "clarification" over guessing wrong.
-- "topic" is the specific subject the user mentions, or null when generic.
-- "topic_type" is "semantic" (a conceptual subject), "structural" (a reference to a
-  numbered/positional item like "problema 2.1" or "el primer ejercicio"), or null.
-- "intent" is a short English verb phrase describing the action (e.g. "ask_question",
-  "generate_quiz", "solve_math", "chat").
+- Pick exactly one tool key from the list above.
+- Greeting, small talk, or "what can you do" -> "greetings".
+- Ambiguous, no tool clearly matches -> "clarification" (never force a wrong guess).
+- topic: the specific subject mentioned, or null when generic.
+- topic_type: "semantic" (conceptual subject), "structural" (numbered/positional ref,
+  e.g. "problema 2.1" or "el primer ejercicio"), or null.
+- intent: short English verb phrase (e.g. "ask_question", "generate_quiz", "solve_math", "chat").
 
 ## Output
-Reply with ONLY valid JSON, no markdown fences, no other text:
+ONLY valid JSON, no markdown fences, no other text:
 {"tool": "...", "intent": "...", "topic": "...", "topic_type": "..."}
 PROMPT;
 

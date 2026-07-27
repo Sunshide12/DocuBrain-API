@@ -24,6 +24,13 @@ class OrchestratorAgent
     /** How many previous messages to feed the router and the resolved tool as context. */
     private const HISTORY_SIZE = 3;
 
+    /**
+     * Matches a message that consists ONLY of a common greeting/farewell/thanks
+     * phrase (optionally with trailing punctuation or emoji) — never a substring
+     * match, so "hola, tengo una duda sobre el capítulo 3" is left for the router.
+     */
+    private const GREETING_PATTERN = '/^(hola+|hello|hi|hey|buenas|buen[oa]s?\s+(d[ií]as|tardes|noches)|qu[eé]\s+tal|c[oó]mo\s+(est[aá]s?|andas?)|gracias|muchas\s+gracias|de\s+nada|adi[oó]s|chau|hasta\s+luego|nos\s+vemos)[\s!¡.,¿?]*$/iu';
+
     public function __construct(
         private readonly ToolRegistry $registry,
         private readonly OrchestratorRouter $router,
@@ -34,7 +41,13 @@ class OrchestratorAgent
     {
         $history = $this->buildHistory($conversation);
 
-        $routed = $this->router->route($question, $history);
+        // Skip the router's LLM call entirely for obvious greetings/farewells — it
+        // always resolves to "greetings" anyway, so this saves a full LLM round-trip
+        // on the most frequent low-value turn without touching routing for anything
+        // else (any doubt falls through to the real router).
+        $routed = $this->isTrivialGreeting($question)
+            ? ['tool' => 'greetings', 'intent' => 'chat', 'topic' => null, 'topic_type' => null]
+            : $this->router->route($question, $history);
 
         $document = $conversation->document;
 
@@ -78,6 +91,17 @@ class OrchestratorAgent
                 agentKey: $routed['tool'],
             );
         }
+    }
+
+    private function isTrivialGreeting(string $question): bool
+    {
+        $normalized = trim($question);
+
+        if ($normalized === '' || mb_strlen($normalized) > 40) {
+            return false;
+        }
+
+        return (bool) preg_match(self::GREETING_PATTERN, $normalized);
     }
 
     /**

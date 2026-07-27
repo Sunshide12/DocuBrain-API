@@ -7,6 +7,8 @@ use App\Models\Conversation;
 use App\Models\Document;
 use App\Models\User;
 use App\Services\Contracts\EmbeddingProvider;
+use App\Services\PgvectorSimilaritySearch;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Mockery\MockInterface;
@@ -94,5 +96,45 @@ class OrchestratorAgentTest extends TestCase
 
         $this->assertStringNotContainsString('embedding service down', $result->answer);
         $this->assertStringContainsString('problema', $result->answer);
+    }
+
+    public function test_trivial_greeting_skips_the_router_llm_call_entirely(): void
+    {
+        [$user, , $conversation] = $this->makeConversation();
+
+        Http::fake();
+
+        $orchestrator = $this->app->make(OrchestratorAgent::class);
+        $result = $orchestrator->handle('hola!', $conversation, $user->id);
+
+        $this->assertEquals('greetings', $result->agentKey);
+        Http::assertNothingSent();
+    }
+
+    public function test_message_that_merely_contains_a_greeting_word_still_uses_the_real_router(): void
+    {
+        [$user, , $conversation] = $this->makeConversation();
+
+        Http::fake([
+            '*' => Http::response(['choices' => [['message' => ['content' => json_encode([
+                'tool' => 'document_qa',
+                'intent' => 'ask_question',
+                'topic' => null,
+                'topic_type' => null,
+            ])]]]]),
+        ]);
+
+        $this->mock(EmbeddingProvider::class, function (MockInterface $mock) {
+            $mock->shouldReceive('embed')->andReturn([0.1, 0.2]);
+        });
+        $this->mock(PgvectorSimilaritySearch::class, function (MockInterface $mock) {
+            $mock->shouldReceive('search')->andReturn(new Collection());
+        });
+
+        $orchestrator = $this->app->make(OrchestratorAgent::class);
+        $result = $orchestrator->handle('hola, tengo una pregunta sobre el capítulo 3', $conversation, $user->id);
+
+        $this->assertEquals('document_qa', $result->agentKey);
+        Http::assertSentCount(1);
     }
 }
