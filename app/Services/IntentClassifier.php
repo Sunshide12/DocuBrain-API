@@ -16,11 +16,12 @@ use App\Services\Contracts\EmbeddingProvider;
 class IntentClassifier
 {
     /**
-     * Minimum similarity score for a topic to be considered "in the document".
-     * Higher than the quiz threshold (0.35) — we need a confident match to say
-     * the document actually covers the topic.
+     * Ceiling for the relevance threshold. The effective value is the configured
+     * retrieval threshold (services.openrouter.similarity_threshold): this guard
+     * must never be stricter than the retrieval it protects, otherwise it rejects
+     * topics that DocumentQATool would have answered perfectly well.
      */
-    private const TOPIC_RELEVANCE_THRESHOLD = 0.50;
+    private const MAX_TOPIC_RELEVANCE_THRESHOLD = 0.50;
 
     /** If fewer than this many chunks match, the topic is treated as absent. */
     private const MIN_RELEVANT_CHUNKS = 2;
@@ -48,15 +49,24 @@ class IntentClassifier
         try {
             $topicVector = $this->embeddingProvider->embed($topic);
 
+            $threshold = min(
+                (float) config('services.openrouter.similarity_threshold', self::MAX_TOPIC_RELEVANCE_THRESHOLD),
+                self::MAX_TOPIC_RELEVANCE_THRESHOLD,
+            );
+
+            // A short document may hold all of its content in a single chunk, so
+            // demanding two matches would make its topics permanently "missing".
+            $required = min(self::MIN_RELEVANT_CHUNKS, max(1, $document->chunks()->count()));
+
             $matches = $this->similaritySearch->search(
                 queryVector: $topicVector,
                 userId: $userId,
                 documentId: $document->id,
-                threshold: self::TOPIC_RELEVANCE_THRESHOLD,
-                limit: self::MIN_RELEVANT_CHUNKS,
+                threshold: $threshold,
+                limit: $required,
             );
 
-            return $matches->count() >= self::MIN_RELEVANT_CHUNKS;
+            return $matches->count() >= $required;
         } catch (\Throwable) {
             // If the embedding/search fails, assume the topic is present so the
             // tool can handle the request rather than incorrectly rejecting it.
