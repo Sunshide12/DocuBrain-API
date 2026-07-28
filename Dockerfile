@@ -81,7 +81,7 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 COPY docker/supervisord.conf /etc/supervisor/conf.d/docubrain.conf
 
-EXPOSE 8000 8080
+EXPOSE 8001 8081
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/docubrain.conf", "-n"]
